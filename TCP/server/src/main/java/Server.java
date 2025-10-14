@@ -10,6 +10,7 @@ public class Server {
     private static final int THREAD_POOL_SIZE = 10;
     
     public static void main(String[] args) {
+        
         ExecutorService pool = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
         // Inicializa el controlador (Singleton)
         ChatController.getInstance();
