@@ -1,16 +1,35 @@
 import org.mindrot.jbcrypt.BCrypt;
-
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 
 public class DatabaseService {
+
     private static final String DB_URL = "jdbc:postgresql://localhost:5432/chatdb";
     private static final String DB_USER = "chatuser";
     private static final String DB_PASSWORD = "chatpassword";
 
+    public enum GroupCreationResult {
+        SUCCESS,
+        ALREADY_EXISTS,
+        DB_ERROR
+    }
+
     private Connection getConnection() throws SQLException {
         return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+    }
+
+    // --- Métodos de Usuario ---
+    public boolean doesUserExist(String username) {
+        String sql = "SELECT 1 FROM users WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            return pstmt.executeQuery().next();
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     public boolean isValidUser(String username, String password) {
@@ -18,11 +37,10 @@ public class DatabaseService {
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, username);
-            try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    String storedHash = rs.getString("password_hash");
-                    return BCrypt.checkpw(password, storedHash);
-                }
+            ResultSet rs = pstmt.executeQuery();
+            if (rs.next()) {
+                String storedHash = rs.getString("password_hash");
+                return BCrypt.checkpw(password, storedHash);
             }
         } catch (SQLException e) {
             System.err.println("Error de base de datos al verificar usuario: " + e.getMessage());
@@ -31,174 +49,196 @@ public class DatabaseService {
     }
 
     public boolean registerUser(String username, String password) {
-        String checkUserSql = "SELECT id FROM users WHERE username = ?";
-        String insertUserSql = "INSERT INTO users(username, password_hash) VALUES(?, ?)";
-
-        try (Connection conn = getConnection()) {
-            // Verificar si el usuario ya existe
-            try (PreparedStatement checkStmt = conn.prepareStatement(checkUserSql)) {
-                checkStmt.setString(1, username);
-                if (checkStmt.executeQuery().next()) {
-                    return false; // El usuario ya existe
-                }
-            }
-
-            // Insertar el nuevo usuario
-            try (PreparedStatement insertStmt = conn.prepareStatement(insertUserSql)) {
-                String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
-                insertStmt.setString(1, username);
-                insertStmt.setString(2, hashedPassword);
-                int affectedRows = insertStmt.executeUpdate();
-                return affectedRows > 0;
-            }
+        String sql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
+            pstmt.setString(1, username);
+            pstmt.setString(2, hashedPassword);
+            pstmt.executeUpdate();
+            return true;
         } catch (SQLException e) {
-            System.err.println("Error de base de datos al registrar usuario: " + e.getMessage());
             return false;
         }
     }
 
-    public void savePublicMessage(String sender, String message) {
-        String sql = "INSERT INTO public_messages(sender_username, message_text) VALUES(?, ?)";
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    // --- Métodos de Mensajes Públicos ---
+    public void savePublicMessage(String sender, String text) {
+        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, 'TEXT')";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
-            pstmt.setString(2, message);
+            pstmt.setString(2, text);
             pstmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Error al guardar mensaje público: " + e.getMessage());
         }
     }
     
-    public List<String> getPublicHistory(int limit) {
-        List<String> history = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, sent_at FROM public_messages ORDER BY sent_at DESC LIMIT ?";
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    public List<String> getPublicMessages(int limit) {
+        List<String> messages = new ArrayList<>();
+        String sql = "SELECT sender_username, message_content, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String message = rs.getString("message_text");
-                history.add(0, String.format("[%s]: %s", sender, message)); // Añadir al principio para orden cronológico
+                String content = rs.getString("message_content");
+                String type = rs.getString("message_type");
+                if ("AUDIO".equals(type)) {
+                     messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null));
+                } else {
+                     messages.add(createChatMessage("public", sender, sender, content, null));
+                }
             }
         } catch (SQLException e) {
-            System.err.println("Error al obtener historial de mensajes: " + e.getMessage());
+            System.err.println("Error al obtener historial público: " + e.getMessage());
         }
-        return history;
+        return messages;
     }
     
+    // --- Métodos de Grupos ---
     public GroupCreationResult createGroup(String groupName, String ownerUsername) {
-        String checkGroupSql = "SELECT group_name FROM chat_groups WHERE group_name = ?";
-        String createGroupSql = "INSERT INTO chat_groups(group_name) VALUES(?)";
-        String addMemberSql = "INSERT INTO group_members(group_name, username) VALUES(?, ?)";
-    
+        String checkSql = "SELECT 1 FROM chat_groups WHERE group_name = ?";
+        String createSql = "INSERT INTO chat_groups (group_name) VALUES (?)";
+        String addOwnerSql = "INSERT INTO group_members (group_name, username) VALUES (?, ?)";
         try (Connection conn = getConnection()) {
-            conn.setAutoCommit(false); // Iniciar transacción
-    
-            // 1. Verificar si el grupo ya existe
-            try (PreparedStatement checkStmt = conn.prepareStatement(checkGroupSql)) {
+            conn.setAutoCommit(false);
+            try (PreparedStatement checkStmt = conn.prepareStatement(checkSql)) {
                 checkStmt.setString(1, groupName);
                 if (checkStmt.executeQuery().next()) {
+                    conn.rollback();
                     return GroupCreationResult.ALREADY_EXISTS;
                 }
             }
-    
-            // 2. Crear el grupo
-            try (PreparedStatement createStmt = conn.prepareStatement(createGroupSql)) {
+            try (PreparedStatement createStmt = conn.prepareStatement(createSql)) {
                 createStmt.setString(1, groupName);
                 createStmt.executeUpdate();
             }
-    
-            // 3. Añadir al dueño como primer miembro
-            try (PreparedStatement addStmt = conn.prepareStatement(addMemberSql)) {
-                addStmt.setString(1, groupName);
-                addStmt.setString(2, ownerUsername);
-                addStmt.executeUpdate();
+            try (PreparedStatement addOwnerStmt = conn.prepareStatement(addOwnerSql)) {
+                addOwnerStmt.setString(1, groupName);
+                addOwnerStmt.setString(2, ownerUsername);
+                addOwnerStmt.executeUpdate();
             }
-    
-            conn.commit(); // Confirmar transacción
+            conn.commit();
             return GroupCreationResult.SUCCESS;
-    
         } catch (SQLException e) {
-            System.err.println("Error en transacción de crear grupo: " + e.getMessage());
+            System.err.println("Error de BD al crear grupo: " + e.getMessage());
             return GroupCreationResult.DB_ERROR;
         }
     }
+
+    public boolean addUserToGroup(String username, String groupName) {
+        String sql = "INSERT INTO group_members (username, group_name) VALUES (?, ?)";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            pstmt.setString(2, groupName);
+            pstmt.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            return false;
+        }
+    }
     
-    public boolean isUserMemberOfGroup(String username, String groupName) {
+    public boolean removeUserFromGroup(String username, String groupName) {
+        String sql = "DELETE FROM group_members WHERE username = ? AND group_name = ?";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            pstmt.setString(2, groupName);
+            return pstmt.executeUpdate() > 0;
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
+    public boolean isUserInGroup(String username, String groupName) {
         String sql = "SELECT 1 FROM group_members WHERE username = ? AND group_name = ?";
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, username);
             pstmt.setString(2, groupName);
             return pstmt.executeQuery().next();
         } catch (SQLException e) {
-            System.err.println("Error al verificar membresía de grupo: " + e.getMessage());
             return false;
         }
     }
     
-    public boolean addUserToGroup(String username, String groupName) {
-        // Asume que la verificación de que el invitador es miembro se hace en el Controller
-        String sql = "INSERT INTO group_members(group_name, username) VALUES(?, ?) ON CONFLICT DO NOTHING";
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-            pstmt.setString(1, groupName);
-            pstmt.setString(2, username);
-            return pstmt.executeUpdate() > 0;
+    public boolean isGroup(String name) {
+        String sql = "SELECT 1 FROM chat_groups WHERE group_name = ?";
+         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, name);
+            return pstmt.executeQuery().next();
         } catch (SQLException e) {
-            System.err.println("Error al añadir usuario a grupo: " + e.getMessage());
             return false;
         }
     }
-
-    // --- NUEVOS MÉTODOS PARA HISTORIAL ---
-
-    public void saveGroupMessage(String groupName, String sender, String message) {
-        String sql = "INSERT INTO group_messages(group_name, sender_username, message_text) VALUES(?, ?, ?)";
+    
+    public List<String> getGroupMembers(String groupName) {
+        List<String> members = new ArrayList<>();
+        String sql = "SELECT username FROM group_members WHERE group_name = ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
-            pstmt.setString(2, sender);
-            pstmt.setString(3, message);
+            ResultSet rs = pstmt.executeQuery();
+            while(rs.next()) {
+                members.add(rs.getString("username"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error al obtener miembros del grupo: " + e.getMessage());
+        }
+        return members;
+    }
+    
+    // --- Métodos de Mensajes de Grupo y Privados ---
+    public void saveGroupMessage(String sender, String groupName, String content, String type) {
+        String sql = "INSERT INTO group_messages (sender_username, group_name, message_content, message_type) VALUES (?, ?, ?, ?)";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, sender);
+            pstmt.setString(2, groupName);
+            pstmt.setString(3, content);
+            pstmt.setString(4, type);
             pstmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Error al guardar mensaje de grupo: " + e.getMessage());
         }
     }
-    
-    public List<String> getGroupHistory(String groupName, int limit) {
-        List<String> history = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
+
+    public List<String> getGroupMessages(String groupName, int limit) {
+        List<String> messages = new ArrayList<>();
+        String sql = "SELECT sender_username, message_content, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             pstmt.setInt(2, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
-                history.add(0, String.format("[%s]: %s", rs.getString("sender_username"), rs.getString("message_text")));
+                String sender = rs.getString("sender_username");
+                String content = rs.getString("message_content");
+                String type = rs.getString("message_type");
+                if ("AUDIO".equals(type)) {
+                    messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName));
+                } else {
+                    messages.add(createChatMessage("group", sender, null, content, groupName));
+                }
             }
         } catch (SQLException e) {
             System.err.println("Error al obtener historial de grupo: " + e.getMessage());
         }
-        return history;
+        return messages;
     }
-
-    public void savePrivateMessage(String sender, String recipient, String message) {
-        String sql = "INSERT INTO private_messages(sender_username, recipient_username, message_text) VALUES(?, ?, ?)";
-        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    
+    public void savePrivateMessage(String sender, String recipient, String content, String type) {
+        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_content, message_type) VALUES (?, ?, ?, ?)";
+         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, recipient);
-            pstmt.setString(3, message);
+            pstmt.setString(3, content);
+            pstmt.setString(4, type);
             pstmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Error al guardar mensaje privado: " + e.getMessage());
         }
     }
 
-    public List<String> getPrivateHistory(String user1, String user2, int limit) {
-        List<String> history = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text FROM private_messages " +
-                     "WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) " +
-                     "ORDER BY sent_at DESC LIMIT ?";
+    public List<String> getPrivateMessages(String user1, String user2, int limit) {
+        List<String> messages = new ArrayList<>();
+        String sql = "SELECT sender_username, recipient_username, message_content, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, user1);
             pstmt.setString(2, user2);
@@ -206,12 +246,37 @@ public class DatabaseService {
             pstmt.setString(4, user1);
             pstmt.setInt(5, limit);
             ResultSet rs = pstmt.executeQuery();
-            while (rs.next()) {
-                history.add(0, String.format("[%s]: %s", rs.getString("sender_username"), rs.getString("message_text")));
+            while(rs.next()){
+                String sender = rs.getString("sender_username");
+                String recipient = rs.getString("recipient_username");
+                String content = rs.getString("message_content");
+                String type = rs.getString("message_type");
+                String subType = sender.equals(user1) ? "private_to" : "private_from";
+                String party = sender.equals(user1) ? recipient : sender;
+                if ("AUDIO".equals(type)) {
+                    messages.add(createChatMessage(subType + "_audio", sender, party, new java.io.File(content).getName(), null));
+                } else {
+                    messages.add(createChatMessage(subType, sender, party, content, null));
+                }
             }
         } catch (SQLException e) {
             System.err.println("Error al obtener historial privado: " + e.getMessage());
         }
-        return history;
+        return messages;
+    }
+    
+    private String createChatMessage(String subType, String sender, String party, String text, String group) {
+        Gson gson = new Gson();
+        JsonObject json = new JsonObject();
+        json.addProperty("type", "chat");
+        json.addProperty("sub_type", subType);
+        json.addProperty("sender", sender);
+        json.addProperty("party", party);
+        json.addProperty("text", text);
+        if (group != null) {
+            json.addProperty("group", group);
+        }
+        return gson.toJson(json);
     }
 }
+

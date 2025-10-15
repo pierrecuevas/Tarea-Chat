@@ -2,10 +2,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.Socket;
 import java.util.List;
 
@@ -15,6 +12,7 @@ public class ClientHandler implements Runnable {
     private final ChatController chatController;
     private final Gson gson;
     private PrintWriter out;
+    private BufferedReader in;
     private String username;
 
     public ClientHandler(Socket socket) {
@@ -25,10 +23,11 @@ public class ClientHandler implements Runnable {
 
     @Override
     public void run() {
-        try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
+        try {
+            this.in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             this.out = new PrintWriter(clientSocket.getOutputStream(), true);
 
-            if (handleAuthentication(in)) {
+            if (handleAuthentication()) {
                 String jsonMessage;
                 while ((jsonMessage = in.readLine()) != null) {
                     processMessage(jsonMessage);
@@ -37,7 +36,9 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             System.out.println("Cliente desconectado: " + (username != null ? username : clientSocket.getRemoteSocketAddress()));
         } finally {
-            chatController.userLogout(this.username);
+            if (this.username != null) {
+                chatController.userLogout(this.username);
+            }
             try {
                 clientSocket.close();
             } catch (IOException e) {
@@ -46,9 +47,8 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private boolean handleAuthentication(BufferedReader in) throws IOException {
+    private boolean handleAuthentication() throws IOException {
         sendMessage("{\"status\": \"auth_required\", \"message\": \"Elige: login o register\"}");
-
         String authRequest;
         while ((authRequest = in.readLine()) != null) {
             try {
@@ -60,44 +60,46 @@ public class ClientHandler implements Runnable {
                 if ("login".equals(command)) {
                     if (chatController.loginUser(user, pass, this)) {
                         sendMessage("{\"status\": \"ok\", \"message\": \"Login exitoso. ¡Bienvenido!\"}");
-                        sendPublicHistory();
+                        sendInitialHistory();
                         return true;
                     } else {
                         sendMessage("{\"status\": \"error\", \"message\": \"Credenciales incorrectas o usuario ya conectado.\"}");
                     }
                 } else if ("register".equals(command)) {
-                    if (chatController.registerUser(user, pass)) {
-                        // Iniciar sesión automáticamente después del registro
-                        if (chatController.loginUser(user, pass, this)) {
-                           sendMessage("{\"status\": \"ok\", \"message\": \"Registro exitoso. ¡Bienvenido!\"}");
-                           sendPublicHistory();
-                           return true;
-                        }
+                    if (chatController.registerUser(user, pass) && chatController.loginUser(user, pass, this)) {
+                        sendMessage("{\"status\": \"ok\", \"message\": \"Registro y login exitosos. ¡Bienvenido!\"}");
+                        sendInitialHistory();
+                        return true;
                     } else {
                         sendMessage("{\"status\": \"error\", \"message\": \"El nombre de usuario ya existe.\"}");
                     }
                 }
             } catch (JsonSyntaxException | NullPointerException e) {
-                System.err.println("Error de sintaxis JSON en la autenticación: " + authRequest);
-                sendMessage("{\"status\": \"error\", \"message\": \"Petición mal formada.\"}");
+                 sendMessage("{\"status\": \"error\", \"message\": \"Petición de autenticación mal formada.\"}");
             }
         }
         return false;
     }
-    
-    private void sendPublicHistory() {
-        sendMessage(createNotification("--- Últimos 10 mensajes del chat General ---"));
-        List<String> history = chatController.getPublicChatHistory(10);
-        for (String msg : history) {
-            sendMessage(createChatMessage("history", "server", msg));
-        }
-        sendMessage(createNotification("------------------------------------"));
+
+    private void sendInitialHistory() {
+        sendMessage(chatController.createNotification("--- Últimos 10 mensajes del chat general ---"));
+        chatController.getPublicChatHistory(10).forEach(this::sendMessage);
+        sendMessage(chatController.createNotification("------------------------------------"));
     }
 
     private void processMessage(String jsonMessage) {
         try {
             JsonObject message = gson.fromJson(jsonMessage, JsonObject.class);
             String command = message.get("command").getAsString();
+
+            // Handle file transfers separately as they consume the input stream
+            if ("send_audio".equals(command)) {
+                handleAudioUpload(message);
+                return;
+            } else if ("request_audio".equals(command)) {
+                handleAudioRequest(message);
+                return;
+            }
 
             switch (command) {
                 case "public_message":
@@ -106,50 +108,83 @@ public class ClientHandler implements Runnable {
                 case "private_message":
                     chatController.processPrivateMessage(this.username, message.get("recipient").getAsString(), message.get("text").getAsString());
                     break;
+                case "group_message":
+                    chatController.processGroupMessage(this.username, message.get("group_name").getAsString(), message.get("text").getAsString());
+                    break;
                 case "create_group":
-                    // CORREGIDO: Llamada al método correcto
-                    chatController.createGroup(message.get("group_name").getAsString(), this.username);
+                    chatController.createGroup(this.username, message.get("group_name").getAsString());
                     break;
                 case "invite_to_group":
-                    // CORREGIDO: Llamada al método correcto
                     chatController.inviteToGroup(this.username, message.get("group_name").getAsString(), message.get("user_to_invite").getAsString());
                     break;
-                case "group_message":
-                    chatController.processGroupMessage(message.get("group_name").getAsString(), this.username, message.get("text").getAsString());
+                case "leave_group":
+                    chatController.leaveGroup(this.username, message.get("group_name").getAsString());
                     break;
                 case "get_group_history":
-                    chatController.sendGroupHistory(this.username, message.get("group_name").getAsString());
+                    handleGroupHistoryRequest(message);
                     break;
                 case "get_private_history":
-                    chatController.sendPrivateHistory(this.username, message.get("with_user").getAsString());
+                    handlePrivateHistoryRequest(message);
                     break;
                 default:
-                    sendMessage(createNotification("Comando desconocido."));
+                    sendMessage(chatController.createNotification("Comando desconocido."));
                     break;
             }
-        } catch (JsonSyntaxException | NullPointerException e) {
-            System.err.println("Mensaje JSON mal formado recibido de " + username + ": " + jsonMessage);
+        } catch (JsonSyntaxException | NullPointerException | IOException e) {
+            System.err.println("Error procesando mensaje de " + username + ": " + e.getMessage());
         }
+    }
+
+    private void handleAudioUpload(JsonObject message) {
+        try {
+            long fileSize = message.get("file_size").getAsLong();
+            String savedFilePath = chatController.saveAudioFile(this.username, message.get("file_name").getAsString(), clientSocket.getInputStream(), fileSize);
+            if (savedFilePath != null) {
+                chatController.processAudioMessage(this.username, message.get("recipient").getAsString(), savedFilePath);
+            } else {
+                sendMessage(chatController.createNotification("Error al transferir el archivo de audio."));
+            }
+        } catch (IOException e) {
+            System.err.println("Error durante la subida de audio de " + this.username + ": " + e.getMessage());
+        }
+    }
+
+    private void handleAudioRequest(JsonObject message) throws IOException {
+        String fileName = message.get("file_name").getAsString();
+        File audioFile = chatController.getAudioFile(fileName);
+
+        if (audioFile != null && audioFile.exists()) {
+            JsonObject response = new JsonObject();
+            response.addProperty("type", "audio_transfer");
+            response.addProperty("file_name", fileName);
+            response.addProperty("file_size", audioFile.length());
+            sendMessage(gson.toJson(response));
+
+            try (FileInputStream fis = new FileInputStream(audioFile)) {
+                OutputStream socketOutStream = clientSocket.getOutputStream();
+                fis.transferTo(socketOutStream);
+                socketOutStream.flush();
+                System.out.println("Archivo " + fileName + " enviado a " + this.username);
+            }
+        } else {
+            sendMessage(chatController.createNotification("El archivo de audio '" + fileName + "' no se encontró en el servidor."));
+        }
+    }
+
+    private void handleGroupHistoryRequest(JsonObject message) {
+        String groupName = message.get("group_name").getAsString();
+        sendMessage(chatController.createNotification("--- Últimos 15 mensajes de " + groupName + " ---"));
+        chatController.getGroupChatHistory(groupName, 15).forEach(this::sendMessage);
+    }
+
+    private void handlePrivateHistoryRequest(JsonObject message) {
+        String withUser = message.get("with_user").getAsString();
+        sendMessage(chatController.createNotification("--- Tu historial privado con " + withUser + " ---"));
+        chatController.getPrivateChatHistory(this.username, withUser, 15).forEach(this::sendMessage);
     }
 
     public void sendMessage(String message) {
         out.println(message);
-    }
-    
-    private String createNotification(String message) {
-        JsonObject json = new JsonObject();
-        json.addProperty("type", "notification");
-        json.addProperty("message", message);
-        return gson.toJson(json);
-    }
-
-    private String createChatMessage(String messageType, String sender, String text) {
-        JsonObject json = new JsonObject();
-        json.addProperty("type", "chat");
-        json.addProperty("sub_type", messageType);
-        json.addProperty("sender", sender);
-        json.addProperty("text", text);
-        return gson.toJson(json);
     }
 
     public String getUsername() {
@@ -160,3 +195,4 @@ public class ClientHandler implements Runnable {
         this.username = username;
     }
 }
+
