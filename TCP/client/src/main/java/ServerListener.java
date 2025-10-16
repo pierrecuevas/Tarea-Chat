@@ -18,12 +18,14 @@ public class ServerListener implements Runnable {
     private final BufferedReader inReader;
     private final Gson gson = new Gson();
     private final AudioService audioService; 
+    private final CallHandler callHandler;
 
-    public ServerListener(Client chatClient, Socket socket, AudioService audioService) throws IOException {
+    public ServerListener(Client chatClient, Socket socket, AudioService audioService, CallHandler callHandler) throws IOException {
         this.chatClient = chatClient;
         this.inStream = socket.getInputStream();
         this.inReader = new BufferedReader(new InputStreamReader(this.inStream));
         this.audioService = audioService;
+        this.callHandler = callHandler;
     }
 
     @Override
@@ -57,7 +59,24 @@ public class ServerListener implements Runnable {
             } else {
                 System.out.println("<- " + serverJson);
             }
+            if ("call_request".equals(type)) {
+                String requester = json.get("from").getAsString();
+                chatClient.setIncomingCallFrom(requester);
+                chatClient.setCurrentState(ClientState.INCOMING_CALL);
+                audioService.playRingtone(); // Iniciar tono de llamada
+                System.out.println("\n>> Llamada entrante de " + requester + ". Usa /aceptar o /rechazar.");
             
+            } else if ("call_accepted".equals(type)) {
+                audioService.stopRingtone(); // Detener tono si soy el que llama
+                chatClient.setCurrentState(ClientState.IN_CALL);
+                callHandler.startCall();
+            
+            } else if ("call_ended".equals(type)) { // Asumiendo que el servidor envía esta notificación
+                audioService.stopRingtone();
+                callHandler.stopCall();
+                chatClient.setCurrentState(ClientState.IDLE);
+                System.out.println(">> La llamada ha finalizado.");
+            }
             // Reprint the user's prompt
             System.out.print(String.format("[%s]> ", chatClient.getCurrentChatContext()));
 

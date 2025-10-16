@@ -11,22 +11,91 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class ChatController {
 
-    private static final ChatController instance = new ChatController();
+    private static ChatController instance;
     private final ConcurrentHashMap<String, ClientHandler> onlineUsers = new ConcurrentHashMap<>();
     private final DatabaseService dbService = new DatabaseService();
     private final Gson gson = new Gson();
     private final AtomicLong audioFileCounter = new AtomicLong(System.currentTimeMillis());
     private static final String AUDIO_STORAGE_PATH = "server_audio_files/";
+    private final CallManager callManager;
 
-    private ChatController() {
+    // El constructor ahora es privado y recibe el CallManager.
+    private ChatController(CallManager callManager) {
+        this.callManager = callManager;
         new File(AUDIO_STORAGE_PATH).mkdirs();
     }
 
-    public static ChatController getInstance() {
+    // El patrón Singleton se adapta para inyectar la dependencia.
+    public static synchronized ChatController getInstance(CallManager callManager) {
+        if (instance == null) {
+            instance = new ChatController(callManager);
+        }
+        return instance;
+    }
+    
+    public static synchronized ChatController getInstance() {
+         if (instance == null) {
+            // Esto no debería pasar si Server.java se inicia primero.
+            throw new IllegalStateException("ChatController no ha sido inicializado con un CallManager.");
+        }
         return instance;
     }
 
-    // --- Lógica de Autenticación y Usuarios ---
+    public void userLogout(String username) {
+        if (username != null) {
+            onlineUsers.remove(username);
+            callManager.userDisconnected(username); // Notificar al CallManager
+            broadcastMessage(createNotification(username + " se ha desconectado."));
+            System.out.println(username + " se ha desconectado.");
+        }
+    }
+
+    // --- Lógica de Llamadas ---
+    public void requestCall(String requester, String callee) {
+        ClientHandler requesterHandler = onlineUsers.get(requester);
+        ClientHandler calleeHandler = onlineUsers.get(callee);
+        
+        if (requesterHandler == null) return;
+
+        if (calleeHandler != null) {
+            JsonObject callRequest = new JsonObject();
+            callRequest.addProperty("type", "call_request");
+            callRequest.addProperty("from", requester);
+            calleeHandler.sendMessage(gson.toJson(callRequest));
+            requesterHandler.sendMessage(createNotification("Llamando a " + callee + "..."));
+        } else {
+            requesterHandler.sendMessage(createNotification("El usuario '" + callee + "' no está conectado."));
+        }
+    }
+
+    public void acceptCall(String accepter, String requester) {
+        if (callManager.startCall(accepter, requester)) {
+            JsonObject callAccepted = new JsonObject();
+            callAccepted.addProperty("type", "call_accepted");
+            
+            callAccepted.addProperty("with", requester);
+            onlineUsers.get(accepter).sendMessage(gson.toJson(callAccepted));
+
+            callAccepted.addProperty("with", accepter);
+            onlineUsers.get(requester).sendMessage(gson.toJson(callAccepted));
+        }
+    }
+    
+    public void endCall(String username) {
+        String partner = callManager.getCallPartner(username);
+        callManager.endCall(username);
+
+        JsonObject callEnded = new JsonObject();
+        callEnded.addProperty("type", "call_ended");
+
+        ClientHandler userHandler = onlineUsers.get(username);
+        if(userHandler != null) userHandler.sendMessage(gson.toJson(callEnded));
+        
+        ClientHandler partnerHandler = onlineUsers.get(partner);
+        if(partnerHandler != null) partnerHandler.sendMessage(gson.toJson(callEnded));
+    }
+
+    // --- Otros métodos ---
     public synchronized boolean loginUser(String username, String password, ClientHandler handler) {
         if (dbService.isValidUser(username, password) && !onlineUsers.containsKey(username)) {
             onlineUsers.put(username, handler);
@@ -41,16 +110,7 @@ public class ChatController {
     public boolean registerUser(String username, String password) {
         return dbService.registerUser(username, password);
     }
-
-    public void userLogout(String username) {
-        if (username != null) {
-            onlineUsers.remove(username);
-            broadcastMessage(createNotification(username + " se ha desconectado."));
-            System.out.println(username + " se ha desconectado.");
-        }
-    }
-
-    // --- Lógica de Mensajes y Grupos ---
+    
     public void processPublicMessage(String sender, String text) {
         dbService.savePublicMessage(sender, text);
         String messageJson = createChatMessage("public", sender, sender, text, null);
@@ -128,38 +188,24 @@ public class ChatController {
         }
     }
 
-    // --- Lógica de Historial ---
     public List<String> getPublicChatHistory(int limit) {
-        List<String> history = dbService.getPublicMessages(limit);
-        Collections.reverse(history);
-        return history;
+        return dbService.getPublicMessages(limit);
     }
 
     public List<String> getGroupChatHistory(String groupName, int limit) {
-        List<String> history = dbService.getGroupMessages(groupName, limit);
-        Collections.reverse(history);
-        return history;
+        return dbService.getGroupMessages(groupName, limit);
     }
 
     public List<String> getPrivateChatHistory(String user1, String user2, int limit) {
-        List<String> history = dbService.getPrivateMessages(user1, user2, limit);
-        Collections.reverse(history);
-        return history;
+        return dbService.getPrivateMessages(user1, user2, limit);
     }
-
-    // --- Lógica de Transferencia de Audio ---
+    
     public String saveAudioFile(String sender, String originalFileName, InputStream inStream, long fileSize) {
         String newFileName = String.format("audio_%s_%d.wav", sender, audioFileCounter.getAndIncrement());
         File targetFile = new File(AUDIO_STORAGE_PATH + newFileName);
         try (FileOutputStream fos = new FileOutputStream(targetFile)) {
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-            long totalBytesRead = 0;
-            while (totalBytesRead < fileSize && (bytesRead = inStream.read(buffer, 0, (int)Math.min(buffer.length, fileSize - totalBytesRead))) != -1) {
-                fos.write(buffer, 0, bytesRead);
-                totalBytesRead += bytesRead;
-            }
-            return (totalBytesRead == fileSize) ? targetFile.getPath() : null;
+            inStream.transferTo(fos);
+            return targetFile.getPath();
         } catch (IOException e) {
             return null;
         }
@@ -168,8 +214,8 @@ public class ChatController {
     public void processAudioMessage(String sender, String recipient, String audioFilePath) {
         if (dbService.isGroup(recipient)) {
             dbService.saveGroupMessage(sender, recipient, audioFilePath, "AUDIO");
-            String notification = createChatMessage("group_audio", sender, null, new File(audioFilePath).getName(), recipient);
-            broadcastToGroup(sender, recipient, notification);
+            String messageJson = createChatMessage("group_audio", sender, null, new File(audioFilePath).getName(), recipient);
+            broadcastToGroup(sender, recipient, messageJson);
         } else {
             dbService.savePrivateMessage(sender, recipient, audioFilePath, "AUDIO");
             ClientHandler recipientHandler = onlineUsers.get(recipient);
@@ -188,13 +234,9 @@ public class ChatController {
             return null;
         }
         File file = new File(AUDIO_STORAGE_PATH + fileName);
-        if (file.exists() && !file.isDirectory()) {
-            return file;
-        }
-        return null;
+        return (file.exists() && !file.isDirectory()) ? file : null;
     }
-
-    // --- Métodos de Utilidad ---
+    
     private void broadcastMessage(String message) {
         onlineUsers.values().forEach(handler -> handler.sendMessage(message));
     }

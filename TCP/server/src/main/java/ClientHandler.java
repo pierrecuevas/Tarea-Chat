@@ -1,53 +1,46 @@
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
-
 import java.io.*;
 import java.net.Socket;
-import java.util.List;
 
 public class ClientHandler implements Runnable {
 
     private final Socket clientSocket;
     private final ChatController chatController;
+    private final CallManager callManager;
     private final Gson gson;
     private PrintWriter out;
-    private BufferedReader in;
     private String username;
 
-    public ClientHandler(Socket socket) {
+    public ClientHandler(Socket socket, CallManager callManager) {
         this.clientSocket = socket;
-        this.chatController = ChatController.getInstance();
+        // Inyecta el CallManager al obtener la instancia del Singleton.
+        this.chatController = ChatController.getInstance(callManager);
+        this.callManager = callManager;
         this.gson = new Gson();
     }
 
     @Override
     public void run() {
-        try {
-            this.in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))) {
             this.out = new PrintWriter(clientSocket.getOutputStream(), true);
-
-            if (handleAuthentication()) {
+            if (handleAuthentication(in)) {
                 String jsonMessage;
                 while ((jsonMessage = in.readLine()) != null) {
                     processMessage(jsonMessage);
                 }
             }
         } catch (IOException e) {
-            System.out.println("Cliente desconectado: " + (username != null ? username : clientSocket.getRemoteSocketAddress()));
+            // Normal when client disconnects
         } finally {
             if (this.username != null) {
                 chatController.userLogout(this.username);
             }
-            try {
-                clientSocket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
         }
     }
 
-    private boolean handleAuthentication() throws IOException {
+    private boolean handleAuthentication(BufferedReader in) throws IOException {
         sendMessage("{\"status\": \"auth_required\", \"message\": \"Elige: login o register\"}");
         String authRequest;
         while ((authRequest = in.readLine()) != null) {
@@ -92,14 +85,8 @@ public class ClientHandler implements Runnable {
             JsonObject message = gson.fromJson(jsonMessage, JsonObject.class);
             String command = message.get("command").getAsString();
 
-            // Handle file transfers separately as they consume the input stream
-            if ("send_audio".equals(command)) {
-                handleAudioUpload(message);
-                return;
-            } else if ("request_audio".equals(command)) {
-                handleAudioRequest(message);
-                return;
-            }
+            if ("send_audio".equals(command)) { handleAudioUpload(message); return; }
+            if ("request_audio".equals(command)) { handleAudioRequest(message); return; }
 
             switch (command) {
                 case "public_message":
@@ -126,15 +113,25 @@ public class ClientHandler implements Runnable {
                 case "get_private_history":
                     handlePrivateHistoryRequest(message);
                     break;
+                // --- NUEVOS CASOS PARA SEÑALIZACIÓN DE LLAMADAS ---
+                case "call_request":
+                    chatController.requestCall(this.username, message.get("callee").getAsString());
+                    break;
+                case "call_accept":
+                    chatController.acceptCall(this.username, message.get("requester").getAsString());
+                    break;
+                case "call_hangup":
+                    chatController.endCall(this.username);
+                    break;
                 default:
                     sendMessage(chatController.createNotification("Comando desconocido."));
                     break;
             }
-        } catch (JsonSyntaxException | NullPointerException | IOException e) {
+        } catch (Exception e) {
             System.err.println("Error procesando mensaje de " + username + ": " + e.getMessage());
         }
     }
-
+    
     private void handleAudioUpload(JsonObject message) {
         try {
             long fileSize = message.get("file_size").getAsLong();
@@ -164,13 +161,12 @@ public class ClientHandler implements Runnable {
                 OutputStream socketOutStream = clientSocket.getOutputStream();
                 fis.transferTo(socketOutStream);
                 socketOutStream.flush();
-                System.out.println("Archivo " + fileName + " enviado a " + this.username);
             }
         } else {
             sendMessage(chatController.createNotification("El archivo de audio '" + fileName + "' no se encontró en el servidor."));
         }
     }
-
+    
     private void handleGroupHistoryRequest(JsonObject message) {
         String groupName = message.get("group_name").getAsString();
         sendMessage(chatController.createNotification("--- Últimos 15 mensajes de " + groupName + " ---"));
@@ -187,12 +183,7 @@ public class ClientHandler implements Runnable {
         out.println(message);
     }
 
-    public String getUsername() {
-        return username;
-    }
-
-    public void setUsername(String username) {
-        this.username = username;
-    }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
 }
 
