@@ -7,10 +7,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.Socket;
 
-/**
- * Listens for incoming messages from the server in a dedicated thread.
- * It parses the JSON messages and formats them for display in the console.
- */
 public class ServerListener implements Runnable {
     
     private final Client chatClient;
@@ -36,54 +32,103 @@ public class ServerListener implements Runnable {
                 handleServerMessage(serverJson);
             }
         } catch (IOException e) {
-            // This is expected when the client disconnects.
+            // Se espera cuando el cliente se desconecta
         }
     }
 
     private void handleServerMessage(String serverJson) {
+        // Borra la línea actual del prompt del usuario antes de imprimir el nuevo mensaje
+        System.out.print("\r" + " ".repeat(100) + "\r");
+        
         try {
-            // Erase the current line (prompt) before printing the new message
-            System.out.print("\r" + " ".repeat(chatClient.getCurrentChatContext().length() + 50) + "\r");
-            
             JsonObject json = gson.fromJson(serverJson, JsonObject.class);
             String type = json.has("type") ? json.get("type").getAsString() : "unknown";
 
-            if ("audio_transfer".equals(type)) {
-                long fileSize = json.get("file_size").getAsLong();
-                String fileName = json.get("file_name").getAsString();
-                audioService.saveDownloadedAudio(fileName, inStream, fileSize);
-            } else if ("chat".equals(type)) {
-                formatAndPrintChatMessage(json);
-            } else if ("notification".equals(type)) {
-                System.out.println(">> " + json.get("message").getAsString());
-            } else {
-                System.out.println("<- " + serverJson);
+            switch (type) {
+                case "audio_transfer":
+                    handleAudioTransfer(json);
+                    break;
+                case "chat":
+                    formatAndPrintChatMessage(json);
+                    break;
+                case "notification":
+                    handleNotification(json);
+                    break;
+                case "call_request":
+                    handleCallRequest(json);
+                    break;
+                case "call_accepted":
+                    handleCallAccepted();
+                    break;
+                case "call_rejected":
+                    handleCallRejected(json);
+                    break;
+                case "call_ended":
+                    handleCallEnded();
+                    break;
+                default:
+                    System.out.println("<- " + serverJson);
+                    break;
             }
-            if ("call_request".equals(type)) {
-                String requester = json.get("from").getAsString();
-                chatClient.setIncomingCallFrom(requester);
-                chatClient.setCurrentState(ClientState.INCOMING_CALL);
-                audioService.playRingtone(); // Iniciar tono de llamada
-                System.out.println("\n>> Llamada entrante de " + requester + ". Usa /aceptar o /rechazar.");
-            
-            } else if ("call_accepted".equals(type)) {
-                audioService.stopRingtone(); // Detener tono si soy el que llama
-                chatClient.setCurrentState(ClientState.IN_CALL);
-                callHandler.startCall();
-            
-            } else if ("call_ended".equals(type)) { // Asumiendo que el servidor envía esta notificación
-                audioService.stopRingtone();
-                callHandler.stopCall();
-                chatClient.setCurrentState(ClientState.IDLE);
-                System.out.println(">> La llamada ha finalizado.");
-            }
-            // Reprint the user's prompt
-            System.out.print(String.format("[%s]> ", chatClient.getCurrentChatContext()));
-
         } catch (JsonSyntaxException e) {
-            // Handle plain text messages from the server (like history headers)
             System.out.println("<- " + serverJson);
-            System.out.print(String.format("[%s]> ", chatClient.getCurrentChatContext()));
+        }
+        
+        // Reimprime el prompt del usuario, que ahora reflejará el estado actualizado
+        System.out.print(getPrompt());
+    }
+    
+    private void handleAudioTransfer(JsonObject json) {
+        long fileSize = json.get("file_size").getAsLong();
+        String fileName = json.get("file_name").getAsString();
+        audioService.saveDownloadedAudio(fileName, inStream, fileSize);
+    }
+    
+    private void handleNotification(JsonObject json) {
+        String message = json.get("message").getAsString();
+        System.out.println(">> " + message);
+        if (message.startsWith("No se pudo establecer la llamada")) {
+            chatClient.setCurrentState(ClientState.IDLE);
+        }
+    }
+
+    private void handleCallRequest(JsonObject json) {
+        String requester = json.get("from").getAsString();
+        chatClient.setIncomingCallFrom(requester);
+        chatClient.setCurrentState(ClientState.INCOMING_CALL);
+        System.out.println("\n>> Llamada entrante de " + requester + ". Usa /aceptar o /rechazar.");
+    }
+    
+    private void handleCallAccepted() {
+        System.out.println(">> Llamada aceptada. ¡Conectando!");
+        chatClient.setIncomingCallFrom(null);
+        chatClient.setCurrentState(ClientState.IN_CALL);
+        callHandler.startCall();
+    }
+    
+    private void handleCallRejected(JsonObject json) {
+        String user = json.get("user").getAsString();
+        System.out.println(">> " + user + " ha rechazado la llamada.");
+        chatClient.setCurrentState(ClientState.IDLE);
+    }
+
+    private void handleCallEnded() {
+        // Solo si no estamos ya en IDLE, para evitar mensajes duplicados
+        if(chatClient.getCurrentState() != ClientState.IDLE) {
+            callHandler.stopCall();
+            chatClient.setIncomingCallFrom(null);
+            chatClient.setCurrentState(ClientState.IDLE);
+            System.out.println("\n>> La llamada ha finalizado.");
+        }
+    }
+
+    private String getPrompt() {
+        ClientState state = chatClient.getCurrentState();
+        switch (state) {
+            case OUTGOING_CALL: return ">> Llamando... (escribe /colgar para cancelar)\n> ";
+            case INCOMING_CALL: return ">> Llamada entrante de " + chatClient.getIncomingCallFrom() + ". (/aceptar o /rechazar)\n> ";
+            case IN_CALL: return ">> Llamada en curso... (escribe /colgar para finalizar)\n> ";
+            default: return String.format("[%s]> ", chatClient.getCurrentChatContext());
         }
     }
 
@@ -112,10 +157,16 @@ public class ServerListener implements Runnable {
                  formattedMessage = String.format("[%s] %s envió una nota de voz: %s", json.get("group").getAsString(), json.get("sender").getAsString(), text);
                 break;
             case "private_audio_from":
-                formattedMessage = String.format("[Privado de %s] Nota de voz: %s", json.get("sender").getAsString(), text);
+                // Mensaje para el receptor
+                String sender = json.get("sender").getAsString();
+                String fileName = text;
+                formattedMessage = String.format(">> ¡Nota de voz de %s recibida! Archivo: %s (Usa /reproducir %s)", sender, fileName, fileName);
                 break;
             case "private_audio_to":
-                formattedMessage = String.format("[Privado para %s] Nota de voz: %s", json.get("party").getAsString(), text);
+                 // Mensaje de confirmación para el emisor 
+                String recipient = json.get("party").getAsString();
+                String sentFileName = text;
+                formattedMessage = String.format(">> Nota de voz enviada a %s. Archivo: %s", recipient, sentFileName);
                 break;
             default:
                 formattedMessage = text;

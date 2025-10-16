@@ -4,7 +4,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -68,6 +67,7 @@ public class ChatController {
         }
     }
 
+    // MÉTODO MODIFICADO
     public void acceptCall(String accepter, String requester) {
         if (callManager.startCall(accepter, requester)) {
             JsonObject callAccepted = new JsonObject();
@@ -78,6 +78,16 @@ public class ChatController {
 
             callAccepted.addProperty("with", accepter);
             onlineUsers.get(requester).sendMessage(gson.toJson(callAccepted));
+        } else {
+            // BLOQUE AÑADIDO: Notificar a ambos usuarios que la llamada no se pudo establecer
+            ClientHandler requesterHandler = onlineUsers.get(requester);
+            if (requesterHandler != null) {
+                requesterHandler.sendMessage(createNotification("No se pudo establecer la llamada con " + accepter + "."));
+            }
+            ClientHandler accepterHandler = onlineUsers.get(accepter);
+            if (accepterHandler != null) {
+                accepterHandler.sendMessage(createNotification("No se pudo establecer la llamada con " + requester + "."));
+            }
         }
     }
     
@@ -94,6 +104,43 @@ public class ChatController {
         ClientHandler partnerHandler = onlineUsers.get(partner);
         if(partnerHandler != null) partnerHandler.sendMessage(gson.toJson(callEnded));
     }
+
+
+    // Recopila y envía un resumen del historial (público, privado y de grupos)
+    public void sendInitialHistoryToUser(ClientHandler handler) {
+        String username = handler.getUsername();
+
+        // 1. Historial Público
+        handler.sendMessage(createNotification("--- Últimos 10 mensajes del chat general ---"));
+        dbService.getPublicMessages(10).forEach(handler::sendMessage);
+
+        // 2. Historial Privado
+        handler.sendMessage(createNotification("--- Últimos mensajes privados ---"));
+        List<String> privatePartners = dbService.getPrivateChatPartners(username);
+        if (privatePartners.isEmpty()) {
+            handler.sendMessage(createNotification("No tienes mensajes privados recientes."));
+        } else {
+            privatePartners.forEach(partner -> {
+                handler.sendMessage(createNotification("--- Conversación con " + partner + " ---"));
+                // Obtenemos solo los últimos 5 mensajes de cada conversación para no saturar
+                dbService.getPrivateMessages(username, partner, 5).forEach(handler::sendMessage);
+            });
+        }
+
+        // 3. Historial de Grupos
+        handler.sendMessage(createNotification("--- Últimos mensajes de tus grupos ---"));
+        List<String> userGroups = dbService.getUserGroups(username);
+        if (!userGroups.isEmpty()) {
+            userGroups.forEach(group -> {
+                handler.sendMessage(createNotification("--- Mensajes de " + group + " ---"));
+                dbService.getGroupMessages(group, 5).forEach(handler::sendMessage);
+            });
+        }
+        
+        handler.sendMessage(createNotification("------------------------------------"));
+        handler.sendMessage(createNotification("¡Bienvenido!"));
+    }
+
 
     // --- Otros métodos ---
     public synchronized boolean loginUser(String username, String password, ClientHandler handler) {
@@ -204,11 +251,20 @@ public class ChatController {
         String newFileName = String.format("audio_%s_%d.wav", sender, audioFileCounter.getAndIncrement());
         File targetFile = new File(AUDIO_STORAGE_PATH + newFileName);
         try (FileOutputStream fos = new FileOutputStream(targetFile)) {
-            inStream.transferTo(fos);
-            return targetFile.getPath();
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+            long totalBytesRead = 0;
+            while (totalBytesRead < fileSize && (bytesRead = inStream.read(buffer, 0, (int)Math.min(buffer.length, fileSize - totalBytesRead))) != -1) {
+                fos.write(buffer, 0, bytesRead);
+                totalBytesRead += bytesRead;
+            }
+            if(totalBytesRead == fileSize) {
+                return targetFile.getPath();
+            }
         } catch (IOException e) {
-            return null;
+             System.err.println("Error guardando archivo de audio: " + e.getMessage());
         }
+        return null;
     }
 
     public void processAudioMessage(String sender, String recipient, String audioFilePath) {
@@ -274,5 +330,16 @@ public class ChatController {
         }
         return gson.toJson(json);
     }
+    
+    public void rejectCall(String rejecter, String requester) {
+        ClientHandler requesterHandler = onlineUsers.get(requester);
+        if (requesterHandler != null) {
+            JsonObject callRejected = new JsonObject();
+            callRejected.addProperty("type", "call_rejected");
+            callRejected.addProperty("user", rejecter);
+            requesterHandler.sendMessage(gson.toJson(callRejected));
+        }
+    }
 }
+
 

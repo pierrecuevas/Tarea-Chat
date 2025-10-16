@@ -21,7 +21,6 @@ public class DatabaseService {
         return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
     }
 
-    // --- Métodos de Usuario ---
     public boolean doesUserExist(String username) {
         String sql = "SELECT 1 FROM users WHERE username = ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -62,9 +61,8 @@ public class DatabaseService {
         }
     }
 
-    // --- Métodos de Mensajes Públicos ---
     public void savePublicMessage(String sender, String text) {
-        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, 'TEXT')";
+        String sql = "INSERT INTO public_messages (sender_username, message_text, message_type) VALUES (?, ?, 'TEXT')";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, text);
@@ -76,13 +74,13 @@ public class DatabaseService {
     
     public List<String> getPublicMessages(int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_content, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_text, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_content");
+                String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
                 if ("AUDIO".equals(type)) {
                      messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null));
@@ -95,8 +93,7 @@ public class DatabaseService {
         }
         return messages;
     }
-    
-    // --- Métodos de Grupos ---
+
     public GroupCreationResult createGroup(String groupName, String ownerUsername) {
         String checkSql = "SELECT 1 FROM chat_groups WHERE group_name = ?";
         String createSql = "INSERT INTO chat_groups (group_name) VALUES (?)";
@@ -186,9 +183,8 @@ public class DatabaseService {
         return members;
     }
     
-    // --- Métodos de Mensajes de Grupo y Privados ---
     public void saveGroupMessage(String sender, String groupName, String content, String type) {
-        String sql = "INSERT INTO group_messages (sender_username, group_name, message_content, message_type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO group_messages (sender_username, group_name, message_text, message_type) VALUES (?, ?, ?, ?)";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, groupName);
@@ -202,14 +198,14 @@ public class DatabaseService {
 
     public List<String> getGroupMessages(String groupName, int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_content, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_text, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             pstmt.setInt(2, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_content");
+                String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
                 if ("AUDIO".equals(type)) {
                     messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName));
@@ -224,7 +220,7 @@ public class DatabaseService {
     }
     
     public void savePrivateMessage(String sender, String recipient, String content, String type) {
-        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_content, message_type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_text, message_type) VALUES (?, ?, ?, ?)";
          try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, recipient);
@@ -238,7 +234,7 @@ public class DatabaseService {
 
     public List<String> getPrivateMessages(String user1, String user2, int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, recipient_username, message_content, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, recipient_username, message_text, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, user1);
             pstmt.setString(2, user2);
@@ -249,7 +245,7 @@ public class DatabaseService {
             while(rs.next()){
                 String sender = rs.getString("sender_username");
                 String recipient = rs.getString("recipient_username");
-                String content = rs.getString("message_content");
+                String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
                 String subType = sender.equals(user1) ? "private_to" : "private_from";
                 String party = sender.equals(user1) ? recipient : sender;
@@ -264,7 +260,41 @@ public class DatabaseService {
         }
         return messages;
     }
-    
+
+
+    public List<String> getPrivateChatPartners(String username) {
+        List<String> partners = new ArrayList<>();
+        String sql = "SELECT DISTINCT recipient_username FROM private_messages WHERE sender_username = ? " +
+                     "UNION " +
+                     "SELECT DISTINCT sender_username FROM private_messages WHERE recipient_username = ?";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            pstmt.setString(2, username);
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                partners.add(rs.getString(1));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error al obtener compañeros de chat privado: " + e.getMessage());
+        }
+        return partners;
+    }
+
+    public List<String> getUserGroups(String username) {
+        List<String> groups = new ArrayList<>();
+        String sql = "SELECT group_name FROM group_members WHERE username = ?";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            pstmt.setString(1, username);
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                groups.add(rs.getString("group_name"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error al obtener los grupos del usuario: " + e.getMessage());
+        }
+        return groups;
+    }
+
     private String createChatMessage(String subType, String sender, String party, String text, String group) {
         Gson gson = new Gson();
         JsonObject json = new JsonObject();

@@ -8,16 +8,13 @@ public class ClientHandler implements Runnable {
 
     private final Socket clientSocket;
     private final ChatController chatController;
-    private final CallManager callManager;
     private final Gson gson;
     private PrintWriter out;
     private String username;
 
     public ClientHandler(Socket socket, CallManager callManager) {
         this.clientSocket = socket;
-        // Inyecta el CallManager al obtener la instancia del Singleton.
         this.chatController = ChatController.getInstance(callManager);
-        this.callManager = callManager;
         this.gson = new Gson();
     }
 
@@ -32,7 +29,7 @@ public class ClientHandler implements Runnable {
                 }
             }
         } catch (IOException e) {
-            // Normal when client disconnects
+            
         } finally {
             if (this.username != null) {
                 chatController.userLogout(this.username);
@@ -52,17 +49,21 @@ public class ClientHandler implements Runnable {
 
                 if ("login".equals(command)) {
                     if (chatController.loginUser(user, pass, this)) {
-                        sendMessage("{\"status\": \"ok\", \"message\": \"Login exitoso. ¡Bienvenido!\"}");
-                        sendInitialHistory();
+                        sendMessage("{\"status\": \"ok\", \"message\": \"Login exitoso.\"}");
+                        chatController.sendInitialHistoryToUser(this);
                         return true;
                     } else {
                         sendMessage("{\"status\": \"error\", \"message\": \"Credenciales incorrectas o usuario ya conectado.\"}");
                     }
                 } else if ("register".equals(command)) {
-                    if (chatController.registerUser(user, pass) && chatController.loginUser(user, pass, this)) {
-                        sendMessage("{\"status\": \"ok\", \"message\": \"Registro y login exitosos. ¡Bienvenido!\"}");
-                        sendInitialHistory();
-                        return true;
+                     if (chatController.registerUser(user, pass)) {
+                         if (chatController.loginUser(user, pass, this)) {
+                            sendMessage("{\"status\": \"ok\", \"message\": \"Registro y login exitosos.\"}");
+                            chatController.sendInitialHistoryToUser(this);
+                            return true;
+                         } else {
+                            sendMessage("{\"status\": \"error\", \"message\": \"Registro exitoso, pero el login automático falló. Intenta iniciar sesión manualmente.\"}");
+                         }
                     } else {
                         sendMessage("{\"status\": \"error\", \"message\": \"El nombre de usuario ya existe.\"}");
                     }
@@ -74,21 +75,19 @@ public class ClientHandler implements Runnable {
         return false;
     }
 
-    private void sendInitialHistory() {
-        sendMessage(chatController.createNotification("--- Últimos 10 mensajes del chat general ---"));
-        chatController.getPublicChatHistory(10).forEach(this::sendMessage);
-        sendMessage(chatController.createNotification("------------------------------------"));
-    }
 
     private void processMessage(String jsonMessage) {
         try {
             JsonObject message = gson.fromJson(jsonMessage, JsonObject.class);
             String command = message.get("command").getAsString();
 
-            if ("send_audio".equals(command)) { handleAudioUpload(message); return; }
-            if ("request_audio".equals(command)) { handleAudioRequest(message); return; }
-
             switch (command) {
+                case "send_audio":
+                    handleAudioUpload(message); 
+                    break;
+                case "request_audio": 
+                    handleAudioRequest(message); 
+                    break;
                 case "public_message":
                     chatController.processPublicMessage(this.username, message.get("text").getAsString());
                     break;
@@ -113,7 +112,6 @@ public class ClientHandler implements Runnable {
                 case "get_private_history":
                     handlePrivateHistoryRequest(message);
                     break;
-                // --- NUEVOS CASOS PARA SEÑALIZACIÓN DE LLAMADAS ---
                 case "call_request":
                     chatController.requestCall(this.username, message.get("callee").getAsString());
                     break;
@@ -131,11 +129,15 @@ public class ClientHandler implements Runnable {
             System.err.println("Error procesando mensaje de " + username + ": " + e.getMessage());
         }
     }
-    
+
     private void handleAudioUpload(JsonObject message) {
         try {
             long fileSize = message.get("file_size").getAsLong();
-            String savedFilePath = chatController.saveAudioFile(this.username, message.get("file_name").getAsString(), clientSocket.getInputStream(), fileSize);
+            String fileName = message.get("file_name").getAsString();
+            
+            // Llamar al controlador para que lea los bytes del stream del socket
+            String savedFilePath = chatController.saveAudioFile(this.username, fileName, clientSocket.getInputStream(), fileSize);
+            
             if (savedFilePath != null) {
                 chatController.processAudioMessage(this.username, message.get("recipient").getAsString(), savedFilePath);
             } else {
@@ -151,12 +153,14 @@ public class ClientHandler implements Runnable {
         File audioFile = chatController.getAudioFile(fileName);
 
         if (audioFile != null && audioFile.exists()) {
+            // 1. Enviar el JSON de "aviso"
             JsonObject response = new JsonObject();
             response.addProperty("type", "audio_transfer");
             response.addProperty("file_name", fileName);
             response.addProperty("file_size", audioFile.length());
             sendMessage(gson.toJson(response));
 
+            // 2. Enviar los bytes del archivo justo después
             try (FileInputStream fis = new FileInputStream(audioFile)) {
                 OutputStream socketOutStream = clientSocket.getOutputStream();
                 fis.transferTo(socketOutStream);

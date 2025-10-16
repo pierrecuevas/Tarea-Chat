@@ -1,9 +1,9 @@
 import javax.sound.sampled.*;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class AudioService {
@@ -17,14 +17,12 @@ public class AudioService {
     private Thread recordingThread;
     private volatile boolean isRecording = false;
     private final AtomicInteger audioCounter = new AtomicInteger(1);
-    private Clip ringtoneClip;
 
     public AudioService() {
         new File(CLIENT_DOWNLOAD_PATH).mkdirs();
         new File(CLIENT_RECORDING_PATH).mkdirs();
     }
 
-    // --- Métodos para Notas de Voz (Archivos) ---
     public String startRecording(String username) {
         if (isRecording) {
             System.out.println(">> Ya estás grabando un audio.");
@@ -72,16 +70,18 @@ public class AudioService {
     public void saveDownloadedAudio(String fileName, InputStream inStream, long fileSize) {
         File targetFile = new File(CLIENT_DOWNLOAD_PATH + fileName);
         try (FileOutputStream fos = new FileOutputStream(targetFile)) {
+            System.out.println("\n>> Descargando " + fileName + "...");
+            // Leer exactamente 'fileSize' bytes del stream
             byte[] buffer = new byte[4096];
             int bytesRead;
             long totalBytesRead = 0;
-            System.out.println("\n>> Descargando " + fileName + "...");
             while (totalBytesRead < fileSize && (bytesRead = inStream.read(buffer, 0, (int)Math.min(buffer.length, fileSize - totalBytesRead))) != -1) {
                 fos.write(buffer, 0, bytesRead);
                 totalBytesRead += bytesRead;
             }
-            if (totalBytesRead == fileSize) {
+             if (totalBytesRead == fileSize) {
                 System.out.println(">> Descarga completa: " + targetFile.getPath());
+                System.out.println(">> Puedes reproducirlo ahora con: /reproducir " + fileName);
             } else {
                 System.err.println("Error de descarga: El tamaño del archivo no coincide.");
                 targetFile.delete();
@@ -108,46 +108,29 @@ public class AudioService {
             return;
         }
 
-        try (AudioInputStream audioStream = AudioSystem.getAudioInputStream(audioFile);
-             Clip clip = AudioSystem.getClip()) {
-            clip.open(audioStream);
-            System.out.println("\n>> Reproduciendo " + fileName + "...");
-            clip.start();
+        try (AudioInputStream audioStream = AudioSystem.getAudioInputStream(audioFile)) {
+            Clip clip = AudioSystem.getClip();
+            
+            // Usamos un CountDownLatch para esperar a que el listener nos avise que terminó.
+            CountDownLatch sync = new CountDownLatch(1);
             clip.addLineListener(event -> {
                 if (event.getType() == LineEvent.Type.STOP) {
-                    event.getLine().close();
-                    System.out.println(">> Reproducción finalizada.");
+                    sync.countDown();
                 }
             });
-        } catch (UnsupportedAudioFileException | IOException | LineUnavailableException e) {
+            
+            clip.open(audioStream);
+            System.out.println("\n>> Reproduciendo " + fileName + "... (la consola no responderá hasta que termine)");
+            clip.start();
+            
+            // El hilo actual se bloquea aquí hasta que sync.countDown() es llamado.
+            sync.await(); 
+            
+            System.out.println(">> Reproducción finalizada.");
+            clip.close();
+            
+        } catch (UnsupportedAudioFileException | IOException | LineUnavailableException | InterruptedException e) {
             System.err.println("Error al reproducir el audio: " + e.getMessage());
-        }
-    }
-
-    // --- Métodos para Llamadas (Streaming de bytes) ---
-    public void playRingtone() {
-        if (ringtoneClip != null && ringtoneClip.isOpen()) return;
-        try {
-            ringtoneClip = AudioSystem.getClip();
-            AudioFormat format = new AudioFormat(44100, 8, 1, true, false);
-            byte[] tone = new byte[44100]; // 1 segundo de tono a 440Hz
-            for (int i = 0; i < tone.length; i++) {
-                double angle = i / (44100.0 / 440.0) * 2.0 * Math.PI;
-                tone[i] = (byte) (Math.sin(angle) * 100);
-            }
-            try (AudioInputStream toneStream = new AudioInputStream(new ByteArrayInputStream(tone), format, tone.length)) {
-                ringtoneClip.open(toneStream);
-                ringtoneClip.loop(Clip.LOOP_CONTINUOUSLY);
-            }
-        } catch (Exception e) {
-            System.err.println("Error al reproducir el tono de llamada: " + e.getMessage());
-        }
-    }
-
-    public void stopRingtone() {
-        if (ringtoneClip != null && ringtoneClip.isOpen()) {
-            ringtoneClip.stop();
-            ringtoneClip.close();
         }
     }
 
@@ -188,4 +171,3 @@ public class AudioService {
         }
     }
 }
-

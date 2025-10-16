@@ -29,56 +29,78 @@ public class UserInputHandler implements Runnable {
         this.callHandler = callHandler;
     }
 
-   
     @Override
     public void run() {
         try {
             printWelcomeMessage();
             while (true) {
-                // Comprobar el estado ANTES de leer la entrada
+                // El estado actual determina el prompt que se muestra
                 ClientState currentState = chatClient.getCurrentState();
+                displayPrompt(currentState);
                 
-                if (currentState == ClientState.OUTGOING_CALL) {
-                    System.out.print(">> Tono de llamada sonando... (escribe /colgar para cancelar o espera)\r");
-                    handleRingingInput();
-                    continue; // Volver al inicio del bucle
-                }
-                
-                if (currentState == ClientState.IN_CALL) {
-                    System.out.print(">> Llamada en curso... (solo puedes usar /colgar)\r");
-                    handleInCallInput();
-                    continue;
-                }
-
-                // --- Flujo normal de chat si el estado es IDLE ---
-                System.out.print(String.format("[%s]> ", chatClient.getCurrentChatContext()));
                 String line = userInput.readLine();
-                if (line == null || "/exit".equalsIgnoreCase(line.trim())) {
-                    break;
-                }
-                if (!line.trim().isEmpty()) {
-                    handleLine(line.trim());
-                }
+                if (line == null) break; // Fin de la entrada (Ctrl+D)
+
+                // El estado actual determina cómo se procesa la entrada
+                processLineBasedOnState(line.trim(), currentState);
             }
-        } catch (IOException e) { /* ... */ }
+        } catch (IOException e) {
+            System.out.println("\nDesconectado del servidor.");
+        }
+    }
+
+    private void displayPrompt(ClientState state) {
+        switch (state) {
+            case OUTGOING_CALL:
+                System.out.print(">> Llamando... (escribe /colgar para cancelar)\n> ");
+                break;
+            case INCOMING_CALL:
+                System.out.print(">> Llamada entrante de " + chatClient.getIncomingCallFrom() + ". (/aceptar o /rechazar)\n> ");
+                break;
+            case IN_CALL:
+                System.out.print(">> Llamada en curso... (escribe /colgar para finalizar)\n> ");
+                break;
+            case IDLE:
+            default:
+                System.out.print(String.format("[%s]> ", chatClient.getCurrentChatContext()));
+                break;
+        }
     }
     
-    private void printWelcomeMessage() {
-        System.out.println("\n--- Comandos Disponibles ---");
-        System.out.println("/crear <grupo>");
-        System.out.println("/invitar <grupo> <usuario>");
-        System.out.println("/salir <grupo>");
-        System.out.println("/chat <grupo> | /general");
-        System.out.println("/historial <usuario>");
-        System.out.println("/msg <usuario> <mensaje>");
-        System.out.println("/grabar | /detener | /enviar_audio <dest>");
-        System.out.println("/reproducir <archivo.wav>");
-        System.out.println("/llamar");
-        System.out.println("/exit");
-        System.out.println("--------------------------");
+    private void processLineBasedOnState(String line, ClientState state) throws IOException {
+        if (line.isEmpty()) return;
+
+        switch (state) {
+            case OUTGOING_CALL:
+            case IN_CALL:
+                if ("/colgar".equalsIgnoreCase(line)) {
+                    sendHangupRequest();
+                } else {
+                    System.out.println(">> Comando no válido durante una llamada. Usa /colgar.");
+                }
+                break;
+            case INCOMING_CALL:
+                if ("/aceptar".equalsIgnoreCase(line)) {
+                    sendAcceptRequest();
+                } else if ("/rechazar".equalsIgnoreCase(line)) {
+                    sendRejectRequest();
+                } else {
+                    System.out.println(">> Comando no válido. Debes /aceptar o /rechazar.");
+                }
+                break;
+            case IDLE:
+                handleIdleInput(line);
+                break;
+        }
     }
 
-    private void handleLine(String line) throws IOException {
+    private void handleIdleInput(String line) throws IOException {
+        if ("/exit".equalsIgnoreCase(line)) {
+            // Cierra el socket para terminar el bucle del ServerListener
+            chatClient.closeConnection();
+            return;
+        }
+
         JsonObject request = new JsonObject();
         
         if (line.startsWith("/")) {
@@ -89,7 +111,6 @@ public class UserInputHandler implements Runnable {
             switch (command) {
                 case "/reproducir":
                      if (args.isEmpty()) { System.out.println("Uso: /reproducir <nombre_archivo>"); return; }
-                     // If the file is already downloaded, play it. Otherwise, request it.
                      if (audioService.isAudioDownloaded(args)) {
                          audioService.playAudio(args);
                      } else {
@@ -153,37 +174,11 @@ public class UserInputHandler implements Runnable {
                     }
                     return;
                 case "/llamar":
-                    chatClient.setCurrentState(ClientState.OUTGOING_CALL); // Cambiar estado
+                    if (args.isEmpty()) { System.out.println("Uso: /llamar <usuario>"); return; }
+                    // El único lugar donde UserInputHandler cambia el estado
+                    chatClient.setCurrentState(ClientState.OUTGOING_CALL); 
                     request.addProperty("command", "call_request");
                     request.addProperty("callee", args);
-                    out.println(gson.toJson(request));
-                    return;
-                case "/colgar":
-                    sendHangupRequest();
-                    return;
-                case "/aceptar":
-                    String requester = chatClient.getIncomingCallFrom();
-                    if (requester != null) {
-                        request.addProperty("command", "call_accept");
-                        request.addProperty("requester", requester);
-                        chatClient.setIncomingCallFrom(null);
-                    } else {
-                        System.out.println(">> No tienes ninguna llamada entrante para aceptar.");
-                        return;
-                    }
-                    break;
-                case "/rechazar":
-                    requester = chatClient.getIncomingCallFrom();
-                    if (requester != null) {
-                        request.addProperty("command", "call_reject");
-                        request.addProperty("requester", requester);
-                        chatClient.setIncomingCallFrom(null);
-                        chatClient.setCurrentState(ClientState.IDLE);
-                        audioService.stopRingtone();
-                    } else {
-                        System.out.println(">> No tienes ninguna llamada entrante para rechazar.");
-                        return;
-                    }
                     break;
                 default:
                     System.out.println(">> Comando desconocido: " + command);
@@ -200,7 +195,7 @@ public class UserInputHandler implements Runnable {
         }
         out.println(gson.toJson(request));
     }
-
+    
     private void sendAudioFile(String recipient, String filePath) throws IOException {
         File audioFile = new File(filePath);
         if (!audioFile.exists()) {
@@ -217,44 +212,58 @@ public class UserInputHandler implements Runnable {
         out.println(gson.toJson(request));
 
         try (FileInputStream fis = new FileInputStream(audioFile)) {
-            byte[] buffer = new byte[4096];
-            int bytesRead;
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                socketOutStream.write(buffer, 0, bytesRead);
-            }
+            fis.transferTo(socketOutStream);
             socketOutStream.flush();
         }
         System.out.println(">> Archivo de audio enviado.");
     }
-
-        /**
-     * Maneja la entrada mientras el usuario está esperando que respondan su llamada.
-     * Cualquier entrada que no sea /colgar cancela la llamada.
-     */
-    private void handleRingingInput() throws IOException {
-        String line = userInput.readLine();
-        // Automáticamente cuelga si se escribe cualquier cosa
-        sendHangupRequest();
-    }
     
-    /**
-     * Maneja la entrada mientras el usuario está en una llamada activa.
-     * Solo permite el comando /colgar.
-     */
-    private void handleInCallInput() throws IOException {
-        String line = userInput.readLine();
-        if ("/colgar".equalsIgnoreCase(line.trim())) {
-            sendHangupRequest();
+    private void sendAcceptRequest() {
+        String requester = chatClient.getIncomingCallFrom();
+        if (requester != null) {
+            JsonObject request = new JsonObject();
+            request.addProperty("command", "call_accept");
+            request.addProperty("requester", requester);
+            out.println(gson.toJson(request));
         } else {
-            System.out.println(">> Comando no permitido durante una llamada. Usa /colgar para finalizar.");
+            System.out.println(">> No tienes ninguna llamada entrante para aceptar.");
         }
     }
     
+    private void sendRejectRequest() {
+        String requester = chatClient.getIncomingCallFrom();
+        if (requester != null) {
+            JsonObject request = new JsonObject();
+            request.addProperty("command", "call_reject");
+            request.addProperty("requester", requester);
+            out.println(gson.toJson(request));
+            // Volvemos a IDLE inmediatamente al rechazar, no necesitamos esperar al servidor
+            chatClient.setCurrentState(ClientState.IDLE);
+        } else {
+            System.out.println(">> No tienes ninguna llamada entrante para rechazar.");
+        }
+    }
+
     private void sendHangupRequest() {
-        callHandler.stopCall(); // Detiene el audio UDP
+        callHandler.stopCall();
         JsonObject request = new JsonObject();
         request.addProperty("command", "call_hangup");
         out.println(gson.toJson(request));
+    }
+    
+    private void printWelcomeMessage() {
+        System.out.println("\n--- Comandos Disponibles ---");
+        System.out.println("/crear <grupo>");
+        System.out.println("/invitar <grupo> <usuario>");
+        System.out.println("/salir <grupo>");
+        System.out.println("/chat <grupo> | /general");
+        System.out.println("/historial <usuario>");
+        System.out.println("/msg <usuario> <mensaje>");
+        System.out.println("/grabar | /detener | /enviar_audio <dest>");
+        System.out.println("/reproducir <archivo.wav>");
+        System.out.println("/llamar <usuario>");
+        System.out.println("/exit");
+        System.out.println("--------------------------");
     }
 }
 

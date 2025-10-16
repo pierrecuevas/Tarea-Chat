@@ -7,10 +7,6 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 
-/**
- * Handles the authentication flow (login and registration) for the client.
- * This runs synchronously before the main chat functionality starts.
- */
 public class AuthHandler {
     private final BufferedReader in;
     private final PrintWriter out;
