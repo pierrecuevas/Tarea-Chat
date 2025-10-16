@@ -7,4 +7,4 @@
 
 rootProject.name = 'Tarea-Chat'
 
-include(':TCP:server', ':UDP:server', ':TCP:client', ':UDP:client')
+include(':TCP:server',':TCP:client')
