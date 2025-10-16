@@ -5,10 +5,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.Arrays;
 
 public class AudioService {
 
-    private static final AudioFormat FORMAT = new AudioFormat(44100, 16, 2, true, true);
+    private static final AudioFormat FORMAT = new AudioFormat(16000, 16, 1, true, false);
+    public static final int CALL_BUFFER_SIZE = 2048; // Búfer más grande para capturar más audio
+    
     private static final String CLIENT_DOWNLOAD_PATH = "client_downloads/";
     private static final String CLIENT_RECORDING_PATH = "client_recordings/";
 
@@ -138,20 +141,26 @@ public class AudioService {
         if (microphone == null || !microphone.isOpen()) {
             try {
                 microphone = AudioSystem.getTargetDataLine(FORMAT);
-                microphone.open(FORMAT, 1024);
+                microphone.open(FORMAT, CALL_BUFFER_SIZE);
                 microphone.start();
             } catch (LineUnavailableException e) { return null; }
         }
-        byte[] buffer = new byte[1024];
+        byte[] buffer = new byte[CALL_BUFFER_SIZE];
         int bytesRead = microphone.read(buffer, 0, buffer.length);
-        return (bytesRead > 0) ? buffer : null;
+
+        if (bytesRead > 0) {
+            // CAMBIO CRÍTICO: Devuelve una copia del array con el tamaño exacto de los datos leídos.
+            // Esto evita enviar bytes vacíos o "basura".
+            return Arrays.copyOf(buffer, bytesRead);
+        }
+        return null;
     }
 
     public void playAudioFromCall(byte[] audioData, int length) {
         if (speaker == null || !speaker.isOpen()) {
             try {
                 speaker = AudioSystem.getSourceDataLine(FORMAT);
-                speaker.open(FORMAT, 1024);
+                speaker.open(FORMAT, CALL_BUFFER_SIZE);
                 speaker.start();
             } catch (LineUnavailableException e) { return; }
         }

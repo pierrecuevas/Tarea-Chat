@@ -60,7 +60,7 @@ public class CallHandler {
 
         // Hilo para recibir audio
         new Thread(() -> {
-            byte[] buffer = new byte[1024];
+            byte[] buffer = new byte[AudioService.CALL_BUFFER_SIZE];
             while (isInCall) {
                 try {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);

@@ -1,6 +1,7 @@
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketAddress;
+import java.net.InetAddress;
 
 public class UdpServer implements Runnable {
     private static final int UDP_PORT = 12346;
@@ -12,7 +13,7 @@ public class UdpServer implements Runnable {
 
     @Override
     public void run() {
-        try (DatagramSocket socket = new DatagramSocket(UDP_PORT)) {
+        try (DatagramSocket socket = new DatagramSocket(UDP_PORT, InetAddress.getByName("0.0.0.0"))) {
             System.out.println("Servidor UDP escuchando en el puerto " + UDP_PORT);
             byte[] buffer = new byte[1024];
 
