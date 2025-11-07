@@ -62,7 +62,7 @@ public class DatabaseService {
     }
 
     public void savePublicMessage(String sender, String text) {
-        String sql = "INSERT INTO public_messages (sender_username, message_text, message_type) VALUES (?, ?, 'TEXT')";
+        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, 'TEXT')";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, text);
@@ -74,13 +74,13 @@ public class DatabaseService {
     
     public List<String> getPublicMessages(int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_content, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 if ("AUDIO".equals(type)) {
                      messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null));
@@ -184,7 +184,7 @@ public class DatabaseService {
     }
     
     public void saveGroupMessage(String sender, String groupName, String content, String type) {
-        String sql = "INSERT INTO group_messages (sender_username, group_name, message_text, message_type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO group_messages (sender_username, group_name, message_content, message_type) VALUES (?, ?, ?, ?)";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, groupName);
@@ -198,14 +198,14 @@ public class DatabaseService {
 
     public List<String> getGroupMessages(String groupName, int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_content, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             pstmt.setInt(2, limit);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 if ("AUDIO".equals(type)) {
                     messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName));
@@ -220,7 +220,7 @@ public class DatabaseService {
     }
     
     public void savePrivateMessage(String sender, String recipient, String content, String type) {
-        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_text, message_type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_content, message_type) VALUES (?, ?, ?, ?)";
          try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, recipient);
@@ -234,7 +234,7 @@ public class DatabaseService {
 
     public List<String> getPrivateMessages(String user1, String user2, int limit) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, recipient_username, message_text, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, recipient_username, message_content, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, user1);
             pstmt.setString(2, user2);
@@ -245,7 +245,7 @@ public class DatabaseService {
             while(rs.next()){
                 String sender = rs.getString("sender_username");
                 String recipient = rs.getString("recipient_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 String subType = sender.equals(user1) ? "private_to" : "private_from";
                 String party = sender.equals(user1) ? recipient : sender;
