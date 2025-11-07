@@ -5,12 +5,22 @@
   box-sizing: border-box;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0f1629 100%);
   color: #e0e8ff;
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ===== LOGIN STYLES ===== */
@@ -104,6 +114,8 @@ body {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .main-content {
@@ -112,6 +124,7 @@ body {
   overflow: hidden;
   gap: 2px;
   background: rgba(0, 0, 0, 0.2);
+  min-height: 0;
 }
 
 /* ===== HEADER ===== */
@@ -121,6 +134,7 @@ body {
   padding: 15px 25px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   z-index: 10;
+  flex-shrink: 0;
 }
 
 .header-content {
@@ -441,12 +455,24 @@ body {
   flex-direction: column;
   background: linear-gradient(180deg, #0a0e27 0%, #0f1629 100%);
   overflow: hidden;
+  position: relative;
+  min-height: 0; /* Importante para que flex funcione correctamente */
+  height: 100%;
+}
+
+#chatWindowContainer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-window-header {
   padding: 15px 20px;
   background: rgba(20, 40, 80, 0.3);
   border-bottom: 2px solid rgba(100, 150, 255, 0.2);
+  flex-shrink: 0;
 }
 
 .chat-title {
@@ -465,7 +491,9 @@ body {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 20px;
+  min-height: 0;
   background: 
     radial-gradient(circle at 20% 50%, rgba(77, 166, 255, 0.05) 0%, transparent 50%),
     radial-gradient(circle at 80% 80%, rgba(0, 102, 255, 0.05) 0%, transparent 50%);
@@ -590,10 +618,17 @@ body {
 }
 
 /* ===== MESSAGE FORM ===== */
+#messageFormContainer {
+  flex-shrink: 0;
+  width: 100%;
+}
+
 .message-form {
   padding: 15px 20px;
   background: rgba(20, 40, 80, 0.3);
   border-top: 2px solid rgba(100, 150, 255, 0.2);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .message-input-container {

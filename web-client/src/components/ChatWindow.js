@@ -46,9 +46,15 @@ export default class ChatWindow {
     msgElem.className = 'message';
     
     // Determinar si el mensaje es propio
-    const isOwn = message.sub_type?.includes('to') || 
-                  (message.sub_type === 'private_to') ||
-                  (message.sub_type === 'group' && message.sender === window.currentUsername);
+    // Para mensajes públicos, comparar el sender con el usuario actual
+    // Para mensajes privados, usar sub_type 'private_to'
+    // Para mensajes de grupo, comparar sender con usuario actual
+    const isOwn = 
+      (message.sub_type === 'public' && message.sender === window.currentUsername) ||
+      (message.sub_type === 'private_to') ||
+      (message.sub_type === 'group' && message.sender === window.currentUsername) ||
+      (message.sub_type?.includes('to') && message.sub_type !== 'private_from');
+    
     msgElem.classList.add(isOwn ? 'message-own' : 'message-other');
     
     msgElem.innerHTML = `
