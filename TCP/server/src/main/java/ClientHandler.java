@@ -3,6 +3,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import java.io.*;
 import java.net.Socket;
+import java.util.List;
 
 public class ClientHandler implements Runnable {
 
@@ -121,6 +122,12 @@ public class ClientHandler implements Runnable {
                 case "call_hangup":
                     chatController.endCall(this.username);
                     break;
+                case "get_all_users":
+                    handleGetAllUsers();
+                    break;
+                case "get_group_members":
+                    handleGetGroupMembers(message);
+                    break;
                 default:
                     sendMessage(chatController.createNotification("Comando desconocido."));
                     break;
@@ -181,6 +188,32 @@ public class ClientHandler implements Runnable {
         String withUser = message.get("with_user").getAsString();
         sendMessage(chatController.createNotification("--- Tu historial privado con " + withUser + " ---"));
         chatController.getPrivateChatHistory(this.username, withUser, 15).forEach(this::sendMessage);
+    }
+
+    private void handleGetAllUsers() {
+        List<String> users = chatController.getAllUsers();
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "all_users");
+        com.google.gson.JsonArray usersArray = new com.google.gson.JsonArray();
+        for (String user : users) {
+            usersArray.add(user);
+        }
+        response.add("users", usersArray);
+        sendMessage(gson.toJson(response));
+    }
+
+    private void handleGetGroupMembers(JsonObject message) {
+        String groupName = message.get("group_name").getAsString();
+        List<String> members = chatController.getGroupMembers(groupName);
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "group_members");
+        response.addProperty("group_name", groupName);
+        com.google.gson.JsonArray membersArray = new com.google.gson.JsonArray();
+        for (String member : members) {
+            membersArray.add(member);
+        }
+        response.add("members", membersArray);
+        sendMessage(gson.toJson(response));
     }
 
     public void sendMessage(String message) {

@@ -328,6 +328,8 @@ public class ChatController {
         if (group != null) {
             json.addProperty("group", group);
         }
+        // Agregar timestamp actual para mensajes nuevos
+        json.addProperty("sent_at", java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         return gson.toJson(json);
     }
     
@@ -339,6 +341,14 @@ public class ChatController {
             callRejected.addProperty("user", rejecter);
             requesterHandler.sendMessage(gson.toJson(callRejected));
         }
+    }
+    
+    public List<String> getAllUsers() {
+        return dbService.getAllUsers();
+    }
+    
+    public List<String> getGroupMembers(String groupName) {
+        return dbService.getGroupMembers(groupName);
     }
 }
 

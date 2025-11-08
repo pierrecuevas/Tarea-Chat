@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chat Futuro</title>
+<link rel="stylesheet" href="index.css" />
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="loginContainer"></div>
+  
+  <!-- Main Chat App -->
+  <div id="appContainer" style="display: none;">
+    <!-- Header -->
+    <div id="headerContainer"></div>
+    
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <!-- Left Sidebar - Chat List -->
+      <div id="chatListContainer" class="sidebar-left"></div>
+      
+      <!-- Center - Chat Window -->
+      <div class="chat-area">
+        <div id="chatWindowContainer"></div>
+        <div id="messageFormContainer"></div>
+      </div>
+      
+      <!-- Right Sidebar - Online Users / Group Members -->
+      <div id="onlineUsersContainer" class="sidebar-right"></div>
+      <div id="groupMembersContainer" class="sidebar-right" style="display: none;"></div>
+    </div>
+  </div>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
