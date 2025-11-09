@@ -73,19 +73,25 @@ public class DatabaseService {
     }
     
     public List<String> getPublicMessages(int limit) {
+        return getPublicMessages(limit, 0);
+    }
+    
+    public List<String> getPublicMessages(int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type FROM public_messages ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_text, message_type, sent_at FROM public_messages ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, limit);
+            pstmt.setInt(2, offset);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
                 String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
+                String sentAt = rs.getTimestamp("sent_at").toString();
                 if ("AUDIO".equals(type)) {
-                     messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null));
+                     messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null, sentAt));
                 } else {
-                     messages.add(createChatMessage("public", sender, sender, content, null));
+                     messages.add(createChatMessage("public", sender, sender, content, null, sentAt));
                 }
             }
         } catch (SQLException e) {
@@ -197,20 +203,26 @@ public class DatabaseService {
     }
 
     public List<String> getGroupMessages(String groupName, int limit) {
+        return getGroupMessages(groupName, limit, 0);
+    }
+    
+    public List<String> getGroupMessages(String groupName, int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type FROM group_messages WHERE group_name = ? ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, message_text, message_type, sent_at FROM group_messages WHERE group_name = ? ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             pstmt.setInt(2, limit);
+            pstmt.setInt(3, offset);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
                 String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
+                String sentAt = rs.getTimestamp("sent_at").toString();
                 if ("AUDIO".equals(type)) {
-                    messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName));
+                    messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName, sentAt));
                 } else {
-                    messages.add(createChatMessage("group", sender, null, content, groupName));
+                    messages.add(createChatMessage("group", sender, null, content, groupName, sentAt));
                 }
             }
         } catch (SQLException e) {
@@ -233,26 +245,32 @@ public class DatabaseService {
     }
 
     public List<String> getPrivateMessages(String user1, String user2, int limit) {
+        return getPrivateMessages(user1, user2, limit, 0);
+    }
+    
+    public List<String> getPrivateMessages(String user1, String user2, int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, recipient_username, message_text, message_type FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at DESC LIMIT ?";
+        String sql = "SELECT sender_username, recipient_username, message_text, message_type, sent_at FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, user1);
             pstmt.setString(2, user2);
             pstmt.setString(3, user2);
             pstmt.setString(4, user1);
             pstmt.setInt(5, limit);
+            pstmt.setInt(6, offset);
             ResultSet rs = pstmt.executeQuery();
             while(rs.next()){
                 String sender = rs.getString("sender_username");
                 String recipient = rs.getString("recipient_username");
                 String content = rs.getString("message_text");
                 String type = rs.getString("message_type");
+                String sentAt = rs.getTimestamp("sent_at").toString();
                 String subType = sender.equals(user1) ? "private_to" : "private_from";
                 String party = sender.equals(user1) ? recipient : sender;
                 if ("AUDIO".equals(type)) {
-                    messages.add(createChatMessage(subType + "_audio", sender, party, new java.io.File(content).getName(), null));
+                    messages.add(createChatMessage(subType + "_audio", sender, party, new java.io.File(content).getName(), null, sentAt));
                 } else {
-                    messages.add(createChatMessage(subType, sender, party, content, null));
+                    messages.add(createChatMessage(subType, sender, party, content, null, sentAt));
                 }
             }
         } catch (SQLException e) {
@@ -295,7 +313,7 @@ public class DatabaseService {
         return groups;
     }
 
-    private String createChatMessage(String subType, String sender, String party, String text, String group) {
+    private String createChatMessage(String subType, String sender, String party, String text, String group, String sentAt) {
         Gson gson = new Gson();
         JsonObject json = new JsonObject();
         json.addProperty("type", "chat");
@@ -306,7 +324,29 @@ public class DatabaseService {
         if (group != null) {
             json.addProperty("group", group);
         }
+        if (sentAt != null) {
+            json.addProperty("sent_at", sentAt);
+        }
         return gson.toJson(json);
+    }
+    
+    // Método sobrecargado para compatibilidad
+    private String createChatMessage(String subType, String sender, String party, String text, String group) {
+        return createChatMessage(subType, sender, party, text, group, null);
+    }
+    
+    public List<String> getAllUsers() {
+        List<String> users = new ArrayList<>();
+        String sql = "SELECT username FROM users ORDER BY username";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            ResultSet rs = pstmt.executeQuery();
+            while (rs.next()) {
+                users.add(rs.getString("username"));
+            }
+        } catch (SQLException e) {
+            System.err.println("Error al obtener todos los usuarios: " + e.getMessage());
+        }
+        return users;
     }
 }
 

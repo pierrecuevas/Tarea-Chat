@@ -3,6 +3,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 import java.io.*;
 import java.net.Socket;
+import java.util.List;
 
 public class ClientHandler implements Runnable {
 
@@ -79,6 +80,13 @@ public class ClientHandler implements Runnable {
     private void processMessage(String jsonMessage) {
         try {
             JsonObject message = gson.fromJson(jsonMessage, JsonObject.class);
+            
+            // Verificar que el mensaje tenga el campo "command"
+            if (!message.has("command")) {
+                System.err.println("Mensaje sin comando recibido: " + jsonMessage);
+                return;
+            }
+            
             String command = message.get("command").getAsString();
 
             switch (command) {
@@ -112,6 +120,9 @@ public class ClientHandler implements Runnable {
                 case "get_private_history":
                     handlePrivateHistoryRequest(message);
                     break;
+                case "get_chat_history":
+                    handleChatHistoryRequest(message);
+                    break;
                 case "call_request":
                     chatController.requestCall(this.username, message.get("callee").getAsString());
                     break;
@@ -120,6 +131,12 @@ public class ClientHandler implements Runnable {
                     break;
                 case "call_hangup":
                     chatController.endCall(this.username);
+                    break;
+                case "get_all_users":
+                    handleGetAllUsers();
+                    break;
+                case "get_group_members":
+                    handleGetGroupMembers(message);
                     break;
                 default:
                     sendMessage(chatController.createNotification("Comando desconocido."));
@@ -174,13 +191,78 @@ public class ClientHandler implements Runnable {
     private void handleGroupHistoryRequest(JsonObject message) {
         String groupName = message.get("group_name").getAsString();
         sendMessage(chatController.createNotification("--- Últimos 15 mensajes de " + groupName + " ---"));
-        chatController.getGroupChatHistory(groupName, 15).forEach(this::sendMessage);
+        chatController.getGroupChatHistory(groupName, 15, 0).forEach(this::sendMessage);
     }
 
     private void handlePrivateHistoryRequest(JsonObject message) {
         String withUser = message.get("with_user").getAsString();
         sendMessage(chatController.createNotification("--- Tu historial privado con " + withUser + " ---"));
-        chatController.getPrivateChatHistory(this.username, withUser, 15).forEach(this::sendMessage);
+        chatController.getPrivateChatHistory(this.username, withUser, 15, 0).forEach(this::sendMessage);
+    }
+    
+    private void handleChatHistoryRequest(JsonObject message) {
+        String type = message.get("type").getAsString();
+        String name = message.get("name").getAsString();
+        int limit = message.has("limit") ? message.get("limit").getAsInt() : 50;
+        int offset = message.has("offset") ? message.get("offset").getAsInt() : 0;
+        
+        List<String> messages;
+        if ("general".equals(type) || "public".equals(type)) {
+            messages = chatController.getPublicChatHistory(limit, offset);
+        } else if ("private".equals(type)) {
+            messages = chatController.getPrivateChatHistory(this.username, name, limit, offset);
+        } else if ("group".equals(type)) {
+            messages = chatController.getGroupChatHistory(name, limit, offset);
+        } else {
+            sendMessage(chatController.createNotification("Tipo de chat inválido."));
+            return;
+        }
+        
+        // Enviar los mensajes como un array JSON
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "chat_history_response");
+        response.addProperty("chat_type", type);
+        response.addProperty("chat_name", name);
+        com.google.gson.JsonArray messagesArray = new com.google.gson.JsonArray();
+        for (String msg : messages) {
+            try {
+                messagesArray.add(gson.fromJson(msg, JsonObject.class));
+            } catch (Exception e) {
+                // Si no es JSON válido, crear un objeto de notificación
+                JsonObject notif = new JsonObject();
+                notif.addProperty("type", "notification");
+                notif.addProperty("message", msg);
+                messagesArray.add(notif);
+            }
+        }
+        response.add("messages", messagesArray);
+        sendMessage(gson.toJson(response));
+    }
+
+    private void handleGetAllUsers() {
+        List<String> users = chatController.getAllUsers();
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "all_users");
+        com.google.gson.JsonArray usersArray = new com.google.gson.JsonArray();
+        for (String user : users) {
+            usersArray.add(user);
+        }
+        response.add("users", usersArray);
+        sendMessage(gson.toJson(response));
+    }
+
+    private void handleGetGroupMembers(JsonObject message) {
+        String groupName = message.get("group_name").getAsString();
+        List<String> members = chatController.getGroupMembers(groupName);
+        JsonObject response = new JsonObject();
+        response.addProperty("type", "group_members");
+        response.addProperty("group_name", groupName);
+        com.google.gson.JsonArray membersArray = new com.google.gson.JsonArray();
+        for (String member : members) {
+            membersArray.add(member);
+        }
+        response.add("members", membersArray);
+        sendMessage(gson.toJson(response));
     }
 
     public void sendMessage(String message) {
