@@ -16,6 +16,7 @@ Este proyecto es una **aplicación de chat multifuncional** desarrollada en **Ja
 
 Toda la información del usuario y los **historiales de conversación de texto y audio** se gestionan con **persistencia de datos** en una base de datos **PostgreSQL**.
 
+# TAREA 1
 ## Flujo de Autenticación
 El cliente inicia pidiendo **`register`** (registro) o **`login`** (inicio de sesión).
 
@@ -42,3 +43,100 @@ Categoría | Comando / Sintaxis | Descripción | Efecto en el Prompt |
 | **Llamadas** | `/rechazar` | Rechaza una llamada entrante. | Se mantiene. |
 | **Llamadas** | `/colgar` | Finaliza la llamada actual o cancela una llamada saliente. | Se mantiene. |
 
+# TAREA 2
+
+## Descripción General
+
+Se realizo el front end para el chat con registro, login y funcionalidades sociales como mensajes públicos, privados y chats grupales. La interacción visual es guiada por iconos y una interfaz moderna.
+
+***
+
+## Instrucciones para Ejecutar el Sistema
+
+### **1. Pre-requisitos**
+
+- Node.js y npm instalados en tu máquina.
+
+### **2. Ejecución de servicios**
+
+- **Backend TCP**: Es un servidor persistente que lleva la lógica central de usuarios, autenticación y chat.
+- Es el mismo que usamos para la TAREA 1, hay que ejecutar el Server antes de iniciar con cualquier cosa, tambien estar seguro de que la base de datos en postresql esta bien configurada para el proyecto.
+
+- **Proxy HTTP/WS**: Intermediario que traduce las peticiones HTTP/WebSocket del frontend al backend TCP. Hay que ejecutarlo con Node.js, se ejecuta con Node proxy-node/src/index.js
+
+- **Frontend**: En nuestro caso es mas sencillo correrlo con Live Server, o con NPM run 
+
+**Finalmente**
+Abre el navegador en donde dice el proyecto, con Live Server es el puerto 5500.
+
+***
+
+## **Importante:** Como usar
+- Primero hay que iniciar sesion, en caso tal de no tener cuenta crear una cuenta dandole a registrar.
+- En caso de que ya exista un historial de mensajes (chat grupal/privado o grupos) se mostrara el historial en la zona media de la pagina web.
+- En la barra lateral izquierda se encuentran las siguientes opciones:
+- **crear grupo**: Aqui podemos crear un grupo y darle un nombre, el grupo lo podemos crear para nosotros mismos solos, como medio para almacenar Texto que consideremos importante, y tambien hay una opcion para crear el grupo con gente. El uso de crear el grupo con gente es para crearlo solo con usuarios que se encuentran activos en ese momento en la app. Al ingresar el nombre de usuario de tu amigo el cual este conectado, la app automaticamente completara el nombre por ti y lo podras seleccionar, para asi evitar errores humanos de sintaxis en los nombres. 
+- **lista de chats**: Aqui podemos ver el Chat Grupal (General para todo el mundo), tambien podemos ver los grupos a los cuales pertenecemos, y los chats privados que tenemos con las demas personas.
+- Al ingresar a un chat grupal creado por ti u otras personas, tienes la opcion de abandonar el chat. Esta opcion se encuentra encima de la zona de chat, al lado derecho de esa zona.
+- En la barra lateral derecha podemos encontrar los usuarios que estan conectados a la pagina web, estos son los usuarios a los cuales podemos invitar a los chats grupales. 
+
+## Flujo de Comunicación
+
+### **1. Login y Registro**
+
+- El usuario ve una pantalla de login/registro.
+- Al registrarse/logearse, el frontend envía credenciales al **proxy** vía HTTP.
+- El proxy transforma la petición, la envía al backend TCP.
+- El backend TCP valida y responde con éxito/fracaso.
+- El proxy reenvía la respuesta al frontend, que muestra el resultado.
+
+
+### **2. Uso de la aplicación**
+
+- Al iniciar sesión, el usuario ve íconos para chats públicos, privados y grupos.
+- Las listas de chats y usuarios en línea usan iconos diferenciadores (🌐 público, 👤 privados, 👥 grupos).
+
+
+#### **a. Mensajería**
+
+- Mensajes se envían del frontend al proxy por HTTP o WebSocket.
+- El proxy los reenvía al backend TCP.
+- El backend TCP gestiona el almacenamiento y el envío a los destinatarios (broadcast, grupo o privado).
+- Las respuestas/flujos de mensaje llegan del backend al proxy y de allí al frontend por un stream/socket abierto.
+
+
+#### **b. Creación de grupo**
+
+- El usuario presiona el botón "+" en la barra lateral.
+- Aparece un modal para ingresar nombre de grupo e invitar usuarios.
+- Al crear, se hace una petición al proxy para crear el grupo, luego otra/s para invitar usuarios.
+- El backend TCP agrega en la estructura adecuada y notifica a los usuarios.
+
+
+#### **c. Actualización de listas y usuarios**
+
+- El frontend periódicamente (o vía sockets/eventos) pide las listas de usuarios y chats al proxy, que consulta al backend.
+- Todos los clics/interacciones en la interfaz solo disparan lógica en frontend y peticiones API/proxy para mantener sincronía.
+
+***
+
+## Notas Técnicas
+
+- **El frontend NO habla directo con el backend TCP**, siempre pasa por el proxy.
+- Todo el renderizado y UI es controlado por JavaScript de forma reactiva según estado y respuestas.
+- El historial de chat se mantiene en memoria en frontend; (si quieres persistir debes implementarlo en backend y pedir "historial" al entrar a un chat).
+- El diseño es modular: cada componente (Login, ChatList, ChatWindow...) está desacoplado y basado en clases JS ES6.
+
+***
+
+## Resumen Visual
+
+```plaintext
+[Usuario]
+   ⇅         (Navegador y lógica JS, interfaz por iconos)
+[Frontend]
+   ⇅         (HTTP/WS, traducción de mensajes)
+[Proxy Node.js]
+   ⇅         (Protocolo TCP propio)
+[Backend TCP]
+```
