@@ -99,4 +99,12 @@ export function connectMessageStream(sessionId, onMessage) {
     }
   };
 }
+window.addEventListener('beforeunload', () => {
+  // Enviar mensaje de desconexión
+  fetch('http://localhost:3000/disconnect', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${sessionId}` }
+  }).catch(() => {});
+});
+
 

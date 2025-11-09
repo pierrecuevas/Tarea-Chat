@@ -31,9 +31,70 @@ export async function getOnlineUsers(sessionId) {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${sessionId}`
-  },
+    },
   });
   if (!res.ok) throw new Error('Error obteniendo usuarios online');
+  return res.json();
+}
+
+export async function getAllUsers(sessionId) {
+  const res = await fetch(`${BASE_URL}/all-users`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${sessionId}`
+    },
+  });
+  if (!res.ok) throw new Error('Error obteniendo todos los usuarios');
+  return res.json();
+}
+
+export async function getGroupMembers(groupName, sessionId) {
+  const res = await fetch(`${BASE_URL}/group-members?group_name=${encodeURIComponent(groupName)}`, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${sessionId}`
+    },
+  });
+  if (!res.ok) throw new Error('Error obteniendo miembros del grupo');
+  return res.json();
+}
+
+export async function inviteToGroup(groupName, username, sessionId) {
+  const res = await fetch(`${BASE_URL}/invite-to-group`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${sessionId}`
+    },
+    body: JSON.stringify({ group_name: groupName, user_to_invite: username }),
+  });
+  if (!res.ok) throw new Error('Error invitando usuario');
+  return res.json();
+}
+
+export async function getChatHistory(type, name, limit, offset, sessionId) {
+  const res = await fetch(`${BASE_URL}/chat-history`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${sessionId}`
+    },
+    body: JSON.stringify({ type, name, limit, offset }),
+  });
+  if (!res.ok) throw new Error('Error obteniendo historial');
+  return res.json();
+}
+
+export async function leaveGroup(groupName, sessionId) {
+  const res = await fetch(`${BASE_URL}/leave-group`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${sessionId}`
+    },
+    body: JSON.stringify({ group_name: groupName }),
+  });
+  if (!res.ok) throw new Error('Error saliendo del grupo');
   return res.json();
 }
 

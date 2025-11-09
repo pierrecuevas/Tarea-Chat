@@ -66,5 +66,46 @@ async function sendMessageHandler(req, res) {
   }
 }
 
-module.exports = { sendMessageHandler };
+async function getChatHistoryHandler(req, res) {
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) {
+    return res.status(401).json({ success: false, message: 'No session ID' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session || !session.socket) {
+    return res.status(401).json({ success: false, message: 'Invalid session' });
+  }
+
+  const { type, name, limit, offset } = req.body;
+  
+  try {
+    const message = { 
+      command: 'get_chat_history',
+      type: type || 'general',
+      name: name || 'General',
+      limit: limit || 50,
+      offset: offset || 0
+    };
+    
+    // Enviar mensaje al servidor TCP y esperar respuesta
+    const response = await sendTCPMessage(session.socket, message);
+    
+    // La respuesta viene como chat_history_response con un array de mensajes
+    if (response.type === 'chat_history_response') {
+      res.json({ 
+        success: true, 
+        messages: response.messages || [],
+        chat_type: response.chat_type,
+        chat_name: response.chat_name
+      });
+    } else {
+      res.json({ success: false, message: 'Respuesta inesperada del servidor' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+module.exports = { sendMessageHandler, getChatHistoryHandler };
 

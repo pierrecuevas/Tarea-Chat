@@ -89,5 +89,117 @@ async function getOnlineUsersHandler(req, res) {
   res.json({ success: true, users });
 }
 
-module.exports = { createGroupHandler, getOnlineUsersHandler };
+async function getAllUsersHandler(req, res) {
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) {
+    return res.status(401).json({ success: false, message: 'No session ID' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return res.status(401).json({ success: false, message: 'Invalid session' });
+  }
+
+  try {
+    // Obtener usuarios online (sesiones activas)
+    const onlineUsers = Array.from(sessions.values())
+      .map(s => s.username)
+      .filter(u => u && u !== session.username); // Excluir al usuario actual
+
+    console.log(`[GET-ALL-USERS] Usuarios disponibles: ${onlineUsers.join(', ')}`);
+    
+    res.json({ 
+      success: true, 
+      users: onlineUsers,
+      message: 'Usuarios obtenidos' 
+    });
+  } catch (err) {
+    console.error(`[GET-ALL-USERS] Error:`, err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+
+async function getGroupMembersHandler(req, res) {
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) {
+    return res.status(401).json({ success: false, message: 'No session ID' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session || !session.socket) {
+    return res.status(401).json({ success: false, message: 'Invalid session' });
+  }
+
+  const { group_name } = req.query;
+  if (!group_name) {
+    return res.status(400).json({ success: false, message: 'Missing group name' });
+  }
+
+  try {
+    // Enviar comando al servidor TCP
+    session.socket.write(JSON.stringify({ command: 'get_group_members', group_name }) + '\n');
+    // El servidor enviará la respuesta a través del stream
+    res.json({ success: true, message: 'Comando enviado' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+async function inviteToGroupHandler(req, res) {
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) {
+    return res.status(401).json({ success: false, message: 'No session ID' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session || !session.socket) {
+    return res.status(401).json({ success: false, message: 'Invalid session' });
+  }
+
+  const { group_name, user_to_invite } = req.body;
+  if (!group_name || !user_to_invite) {
+    return res.status(400).json({ success: false, message: 'Missing group name or user to invite' });
+  }
+
+  try {
+    session.socket.write(JSON.stringify({
+      command: 'invite_to_group',
+      group_name,
+      user_to_invite
+    }) + '\n');
+    res.json({ success: true, message: 'Comando enviado' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+async function leaveGroupHandler(req, res) {
+  const sessionId = req.headers.authorization?.replace('Bearer ', '');
+  if (!sessionId) {
+    return res.status(401).json({ success: false, message: 'No session ID' });
+  }
+
+  const session = sessions.get(sessionId);
+  if (!session || !session.socket) {
+    return res.status(401).json({ success: false, message: 'Invalid session' });
+  }
+
+  const { group_name } = req.body;
+  if (!group_name) {
+    return res.status(400).json({ success: false, message: 'Missing group name' });
+  }
+
+  try {
+    session.socket.write(JSON.stringify({
+      command: 'leave_group',
+      group_name
+    }) + '\n');
+    res.json({ success: true, message: 'Comando enviado' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+module.exports = { createGroupHandler, getOnlineUsersHandler, getAllUsersHandler, getGroupMembersHandler, inviteToGroupHandler, leaveGroupHandler };
 

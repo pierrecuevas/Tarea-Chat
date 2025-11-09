@@ -110,30 +110,30 @@ public class ChatController {
     public void sendInitialHistoryToUser(ClientHandler handler) {
         String username = handler.getUsername();
 
-        // 1. Historial Público
-        handler.sendMessage(createNotification("--- Últimos 10 mensajes del chat general ---"));
-        dbService.getPublicMessages(10).forEach(handler::sendMessage);
+        // 1. Historial Público - Enviar todos los mensajes
+        handler.sendMessage(createNotification("--- Mensajes del chat general ---"));
+        dbService.getPublicMessages(Integer.MAX_VALUE).forEach(handler::sendMessage);
 
-        // 2. Historial Privado
-        handler.sendMessage(createNotification("--- Últimos mensajes privados ---"));
+        // 2. Historial Privado - Enviar todos los mensajes
+        handler.sendMessage(createNotification("--- Mensajes privados ---"));
         List<String> privatePartners = dbService.getPrivateChatPartners(username);
         if (privatePartners.isEmpty()) {
             handler.sendMessage(createNotification("No tienes mensajes privados recientes."));
         } else {
             privatePartners.forEach(partner -> {
                 handler.sendMessage(createNotification("--- Conversación con " + partner + " ---"));
-                // Obtenemos solo los últimos 5 mensajes de cada conversación para no saturar
-                dbService.getPrivateMessages(username, partner, 5).forEach(handler::sendMessage);
+                // Enviar todos los mensajes de cada conversación
+                dbService.getPrivateMessages(username, partner, Integer.MAX_VALUE).forEach(handler::sendMessage);
             });
         }
 
-        // 3. Historial de Grupos
-        handler.sendMessage(createNotification("--- Últimos mensajes de tus grupos ---"));
+        // 3. Historial de Grupos - Enviar todos los mensajes
+        handler.sendMessage(createNotification("--- Mensajes de tus grupos ---"));
         List<String> userGroups = dbService.getUserGroups(username);
         if (!userGroups.isEmpty()) {
             userGroups.forEach(group -> {
                 handler.sendMessage(createNotification("--- Mensajes de " + group + " ---"));
-                dbService.getGroupMessages(group, 5).forEach(handler::sendMessage);
+                dbService.getGroupMessages(group, Integer.MAX_VALUE).forEach(handler::sendMessage);
             });
         }
         
@@ -235,16 +235,16 @@ public class ChatController {
         }
     }
 
-    public List<String> getPublicChatHistory(int limit) {
-        return dbService.getPublicMessages(limit);
+    public List<String> getPublicChatHistory(int limit, int offset) {
+        return dbService.getPublicMessages(limit, offset);
     }
 
-    public List<String> getGroupChatHistory(String groupName, int limit) {
-        return dbService.getGroupMessages(groupName, limit);
+    public List<String> getGroupChatHistory(String groupName, int limit, int offset) {
+        return dbService.getGroupMessages(groupName, limit, offset);
     }
 
-    public List<String> getPrivateChatHistory(String user1, String user2, int limit) {
-        return dbService.getPrivateMessages(user1, user2, limit);
+    public List<String> getPrivateChatHistory(String user1, String user2, int limit, int offset) {
+        return dbService.getPrivateMessages(user1, user2, limit, offset);
     }
     
     public String saveAudioFile(String sender, String originalFileName, InputStream inStream, long fileSize) {
@@ -328,6 +328,8 @@ public class ChatController {
         if (group != null) {
             json.addProperty("group", group);
         }
+        // Agregar timestamp actual para mensajes nuevos
+        json.addProperty("sent_at", java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         return gson.toJson(json);
     }
     
@@ -339,6 +341,14 @@ public class ChatController {
             callRejected.addProperty("user", rejecter);
             requesterHandler.sendMessage(gson.toJson(callRejected));
         }
+    }
+    
+    public List<String> getAllUsers() {
+        return dbService.getAllUsers();
+    }
+    
+    public List<String> getGroupMembers(String groupName) {
+        return dbService.getGroupMembers(groupName);
     }
 }
 

@@ -1,4 +1,5 @@
 const net = require('net');
+const { createTCPParser } = require('../utils/tcpParser');
 
 const TCP_SERVER_HOST = 'localhost';
 const TCP_SERVER_PORT = 12345;
@@ -48,39 +49,93 @@ function sendTCPMessage(clientSocket, messageJSON) {
 
 async function loginHandler(req, res) {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ success: false, message: 'Missing username or password' });
+  
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Faltan usuario o contraseña' });
+  }
 
   const client = new net.Socket();
+  const parser = createTCPParser();
   let responseSent = false;
+  
+  // Timeout general para toda la conexión
+  const connectionTimeout = setTimeout(() => {
+    if (!responseSent) {
+      responseSent = true;
+      client.destroy();
+      console.error(`[LOGIN] Timeout en conexión TCP para ${username}`);
+      res.status(500).json({ success: false, message: 'Tiempo de conexión agotado' });
+    }
+  }, 10000);
+
   client.connect(TCP_SERVER_PORT, TCP_SERVER_HOST, async () => {
     try {
-      // Primero leer el mensaje inicial del servidor (auth_required)
-      await readTCPMessage(client);
+      console.log(`[LOGIN] Conectando ${username}...`);
       
-      // Luego enviar el comando de login y leer la respuesta
-      const response = await sendTCPMessage(client, { command: 'login', username, password });
-       if (!responseSent) {
+      // Leer mensaje inicial del servidor
+      const initMsg = await parser.readMessage(client, 3000);
+      console.log(`[LOGIN] Mensaje inicial recibido:`, initMsg);
+      
+      // Enviar credenciales
+      client.write(JSON.stringify({ command: 'login', username, password }) + '\n');
+      console.log(`[LOGIN] Credenciales enviadas para ${username}`);
+      
+      // Leer respuesta de login
+      const response = await parser.readMessage(client, 5000);
+      console.log(`[LOGIN] Respuesta recibida:`, response);
+      
+      if (!responseSent) {
         responseSent = true;
+        clearTimeout(connectionTimeout);
+        
+        // Validar respuesta
         if (response.status === 'ok') {
           const sessionId = generateSessionId();
           sessions.set(sessionId, { socket: client, username, listenerSetup: false });
-          res.json({ success: true, sessionId, message: response.message });
+          console.log(`[LOGIN] ✓ Login exitoso para ${username}, sesión: ${sessionId}`);
+          res.json({ 
+            success: true, 
+            sessionId, 
+            message: response.message 
+          });
         } else {
           client.destroy();
-          res.status(401).json({ success: false, message: response.message });
+          sessions.delete(sessionId);
+          console.log(`[LOGIN] ✗ Login rechazado para ${username}: ${response.message}`);
+          res.status(401).json({ 
+            success: false, 
+            message: response.message || 'Credenciales inválidas' 
+          });
         }
       }
     } catch (err) {
-      client.destroy();
-      res.status(500).json({ success: false, message: err.message });
+      if (!responseSent) {
+        responseSent = true;
+        clearTimeout(connectionTimeout);
+        client.destroy();
+        console.error(`[LOGIN] Error durante login de ${username}:`, err.message);
+        res.status(500).json({ 
+          success: false, 
+          message: 'Error en servidor: ' + err.message 
+        });
+      }
     }
   });
 
   client.on('error', (err) => {
     if (!responseSent) {
       responseSent = true;
-      res.status(500).json({ success: false, message: 'TCP connection error: ' + err.message });
+      clearTimeout(connectionTimeout);
+      console.error(`[LOGIN] Error TCP para ${username}:`, err.message);
+      res.status(500).json({ 
+        success: false, 
+        message: 'Error de conexión TCP: ' + err.message 
+      });
     }
+  });
+
+  client.on('close', () => {
+    console.log(`[LOGIN] Conexión TCP cerrada para ${username}`);
   });
 }
 
