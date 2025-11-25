@@ -1,0 +1,33 @@
+Reusing configuration cache.
+> Task :TCP:server:processTestResources NO-SOURCE
+> Task :TCP:server:processResources NO-SOURCE
+
+> Task :TCP:server:compileJava FAILED
+C:\Users\josem\OneDrive\Escritorio\UNIVERSIDAD\5to Semestre\Compunet\Tarea-Chat\TCP\server\src\main\java\Server.java:25: error: cannot find symbol
+                com.zeroc.Ice.Object object = new VoiceChatI();
+                                                  ^
+  symbol:   class VoiceChatI
+  location: class Server
+1 error
+
+[Incubating] Problems report is available at: file:///C:/Users/josem/OneDrive/Escritorio/UNIVERSIDAD/5to%20Semestre/Compunet/Tarea-Chat/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':TCP:server:compileJava'.
+> Compilation failed; see the compiler output below.
+  C:\Users\josem\OneDrive\Escritorio\UNIVERSIDAD\5to Semestre\Compunet\Tarea-Chat\TCP\server\src\main\java\Server.java:25: error: cannot find symbol
+                  com.zeroc.Ice.Object object = new VoiceChatI();
+                                                    ^
+    symbol:   class VoiceChatI
+    location: class Server
+  1 error
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to generate a Build Scan (Powered by Develocity).
+
+BUILD FAILED in 1s
+1 actionable task: 1 executed
+Configuration cache entry reused.

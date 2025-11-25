@@ -16,6 +16,23 @@ public class Server {
         // Se inicia el servidor UDP en un hilo separado, pasándole el CallManager.
         new Thread(new UdpServer(callManager)).start();
 
+        // Start ICE Server in a separate thread
+        new Thread(() -> {
+            try (com.zeroc.Ice.Communicator communicator = com.zeroc.Ice.Util.initialize(args)) {
+                System.out.println("Iniciando servidor ICE...");
+                com.zeroc.Ice.ObjectAdapter adapter = communicator.createObjectAdapterWithEndpoints("VoiceChatAdapter",
+                        "ws -h 0.0.0.0 -p 10000");
+                com.zeroc.Ice.Object object = new VoiceChatI();
+                adapter.add(object, com.zeroc.Ice.Util.stringToIdentity("VoiceChat"));
+                adapter.activate();
+                System.out.println("Servidor ICE iniciado en el puerto 10000 (WebSocket)");
+                communicator.waitForShutdown();
+            } catch (Exception e) {
+                System.err.println("Error en el servidor ICE: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }).start();
+
         try (ServerSocket serverSocket = new ServerSocket(TCP_PORT)) {
             System.out.println("Servidor de Chat (TCP) iniciado en el puerto " + TCP_PORT);
 
@@ -31,4 +48,3 @@ public class Server {
         }
     }
 }
-

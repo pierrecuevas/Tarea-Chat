@@ -6,6 +6,9 @@ import ChatWindow from './components/ChatWindow.js';
 import MessageForm from './components/MessageForm.js';
 import { createGroup, sendMessage, getOnlineUsers, getAllUsers, getGroupMembers, inviteToGroup, getChatHistory, leaveGroup } from './api/ProxyClient.js';
 import { connectMessageStream } from './api/messageStream.js';
+import { VoiceChatClient } from './voice-chat.js';
+import AudioPlayer from './components/AudioPlayer.js';
+import CallControls from './components/CallControls.js';
 
 
 // Containers
@@ -30,6 +33,8 @@ let currentChatType = 'general';
 let currentChatName = 'General';
 let allUsersList = [];
 let invitedUsers = [];
+let voiceChatClient = null;
+let callControls = null;
 
 // Historial de mensajes
 const messageHistory = {
@@ -54,17 +59,17 @@ new LoginForm(loginContainer, async (username) => {
   currentUsername = username;
   window.currentUsername = username;
   sessionId = localStorage.getItem('sessionId');
-  
+
   // Ocultar login y mostrar app
   loginContainer.style.display = 'none';
   appContainer.style.display = 'flex';
-  
+
   // Inicializar componentes
   initializeApp();
-  
+
   // Conectar al stream de mensajes
   startMessageStream();
-  
+
   // Iniciar polling de usuarios online
   startOnlineUsersPolling();
 });
@@ -72,25 +77,25 @@ new LoginForm(loginContainer, async (username) => {
 function initializeApp() {
   // Header
   header = new Header(headerContainer, currentUsername);
-  
+
   // Chat List (izquierda)
   chatList = new ChatList(chatListContainer, (type, name) => {
     currentChatType = type;
     currentChatName = name;
-    
+
     // Limpiar y cargar historial del chat seleccionado
     chatWindow.chatWindow.innerHTML = '';
     loadChatHistory(type, name);
-    
+
     chatWindow.setCurrentChat(type, name);
     messageForm.setCurrentChat({ type, name });
-    
+
     // Si es un chat privado nuevo, agregarlo a la lista
     if (type === 'private') {
       chatList.addPrivateChat(name);
     }
   }, sessionId);
-  
+
   // Online Users List (derecha)
   onlineUsersList = new OnlineUsersList(onlineUsersContainer, (username) => {
     // Al hacer clic en un usuario, abrir chat privado
@@ -103,15 +108,15 @@ function initializeApp() {
     chatWindow.setCurrentChat('private', username);
     messageForm.setCurrentChat({ type: 'private', name: username });
   });
-  
+
   // Chat Window (centro)
   chatWindow = new ChatWindow(chatWindowContainer);
-  
+
   // Configurar callback para cargar más mensajes
   chatWindow.setOnLoadMore(async () => {
     await loadMoreMessages(currentChatType, currentChatName);
   });
-  
+
   // Configurar callback para salir del grupo
   chatWindow.setOnLeaveGroup(async () => {
     if (currentChatType === 'group') {
@@ -137,7 +142,7 @@ function initializeApp() {
       }
     }
   });
-  
+
   // Message Form (centro, abajo)
   messageForm = new MessageForm(messageFormContainer, null);
   messageForm.onMessageSent = async (message) => {
@@ -148,16 +153,90 @@ function initializeApp() {
       chatWindow.addSystemMessage('Error al enviar el mensaje');
     }
   };
-  
+
+  // Inicializar Voice Chat
+  voiceChatClient = new VoiceChatClient();
+
+  // Wait for Ice.js and Chat.js to load before initializing
+  const checkIceLoaded = setInterval(async () => {
+    if (window.Ice && window.demo) {
+      clearInterval(checkIceLoaded);
+      const success = await voiceChatClient.initialize();
+      if (!success) {
+        console.warn('Voice chat initialization failed - voice features may not work');
+      }
+    }
+  }, 100);
+
+  // Timeout after 5 seconds
+  setTimeout(() => {
+    clearInterval(checkIceLoaded);
+    if (!voiceChatClient.proxy) {
+      console.error('Ice.js or Chat.js failed to load within 5 seconds');
+    }
+  }, 5000);
+
+
+  // Voice message recording (microphone button)
+  messageForm.onVoiceRecord = async () => {
+    if (!voiceChatClient.isRecording) {
+      const recipient = currentChatType === 'private' ? currentChatName :
+        currentChatType === 'group' ? currentChatName : 'general';
+
+      await voiceChatClient.startRecordingMessage(recipient);
+      const btn = messageFormContainer.querySelector('#voiceButton');
+      if (btn) {
+        btn.classList.add('recording');
+        btn.title = 'Detener grabación';
+      }
+    } else {
+      await voiceChatClient.stopRecordingMessage();
+      const btn = messageFormContainer.querySelector('#voiceButton');
+      if (btn) {
+        btn.classList.remove('recording');
+        btn.title = 'Grabar nota de voz';
+      }
+      chatWindow.addSystemMessage('Nota de voz enviada');
+    }
+  };
+
+  // Initialize Call Controls
+  const callControlsContainer = document.createElement('div');
+  callControlsContainer.id = 'callControlsContainer';
+  headerContainer.appendChild(callControlsContainer);
+
+  callControls = new CallControls(callControlsContainer);
+
+  callControls.onCallInitiated = async () => {
+    if (currentChatType === 'private') {
+      await voiceChatClient.startCall(currentChatName);
+      callControls.showActiveCall(currentChatName);
+    } else {
+      chatWindow.addSystemMessage('Las llamadas solo están disponibles en chats privados');
+    }
+  };
+
+  callControls.onCallEnded = async () => {
+    await voiceChatClient.endCall();
+  };
+
+  callControls.onCallAccepted = async (caller) => {
+    await voiceChatClient.acceptCall(caller);
+  };
+
+  callControls.onCallRejected = async (caller) => {
+    await voiceChatClient.rejectCall(caller);
+  };
+
   // Configurar autocompletado en formulario de grupo
   setupUserAutocomplete();
-  
+
   // Conectar formulario de grupo
   const groupForm = chatListContainer.querySelector('#groupForm');
   if (groupForm) {
     groupForm.addEventListener('submit', handleCreateGroup);
   }
-  
+
   // Cargar grupos del usuario después de que llegue el historial inicial
   setTimeout(async () => {
     try {
@@ -168,7 +247,7 @@ function initializeApp() {
       console.error('Error cargando grupos:', error);
     }
   }, 2000);
-  
+
   // Seleccionar chat General por defecto y cargar historial
   setTimeout(() => {
     currentChatType = 'general';
@@ -186,15 +265,15 @@ function initializeApp() {
 async function handleCreateGroup(e) {
   e.preventDefault();
   const groupName = document.getElementById('groupNameInput').value.trim();
-  
+
   if (!groupName) {
     alert('Por favor ingresa un nombre para el grupo');
     return;
   }
-  
+
   try {
     await createGroup(groupName, sessionId);
-    
+
     // Invitar usuarios si hay alguno
     if (invitedUsers.length > 0) {
       setTimeout(async () => {
@@ -207,14 +286,14 @@ async function handleCreateGroup(e) {
         }
       }, 500);
     }
-    
+
     // Cerrar modal y limpiar
     const modal = chatListContainer.querySelector('#groupFormModal');
     if (modal) modal.style.display = 'none';
     this.reset();
     invitedUsers = [];
     updateInvitedUsersList();
-    
+
   } catch (error) {
     console.error('Error creando grupo:', error);
     alert('Error al crear el grupo');
@@ -229,10 +308,10 @@ function startMessageStream() {
 
 function processIncomingMessage(message) {
   console.log('Mensaje recibido:', message);
-  
+
   if (message.type === 'notification') {
     const notificationText = message.message || '';
-    
+
     // Detectar notificaciones del historial inicial de grupos
     if (notificationText.includes('--- Mensajes de ')) {
       // Extraer el nombre del grupo de la notificación
@@ -246,7 +325,7 @@ function processIncomingMessage(message) {
       }
       return;
     }
-    
+
     // Detectar notificaciones del historial inicial
     if (notificationText.includes('--- Mensajes') || notificationText.includes('--- Conversación') || notificationText.includes('--- Últimos')) {
       // No mostrar estas notificaciones, solo guardarlas como referencia
@@ -257,87 +336,87 @@ function processIncomingMessage(message) {
     else if (!notificationText.includes('¡Bienvenido!') && !notificationText.includes('------------------------------------')) {
       chatWindow.addSystemMessage(notificationText);
     }
-    
+
   } else if (message.type === 'chat') {
     const { sender, text, sub_type, sent_at, group, party } = message;
-    
-    const messageWithTime = { 
-      sender, 
-      text, 
+
+    const messageWithTime = {
+      sender,
+      text,
       sub_type,
       sent_at: sent_at || new Date().toISOString(),
       group,
       party
     };
-    
+
     // Guardar en historial SIEMPRE, incluso si no está en el chat actual
     if (sub_type === 'public') {
       // Evitar duplicados
-      const exists = messageHistory.general.some(m => 
-        m.sender === messageWithTime.sender && 
-        m.text === messageWithTime.text && 
+      const exists = messageHistory.general.some(m =>
+        m.sender === messageWithTime.sender &&
+        m.text === messageWithTime.text &&
         m.sent_at === messageWithTime.sent_at
       );
       if (!exists) {
         messageHistory.general.push(messageWithTime);
         messageHistory.general.sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
       }
-      
+
       // Mostrar si estamos en el chat general
       if (currentChatType === 'general' && currentChatName === 'General') {
         chatWindow.addMessage(messageWithTime);
       }
-      
+
     } else if (sub_type === 'private_from' || sub_type === 'private_to') {
       const otherUser = sub_type === 'private_from' ? sender : party;
       chatList.addPrivateChat(otherUser);
-      
+
       if (!messageHistory.private[otherUser]) {
         messageHistory.private[otherUser] = [];
       }
-      
+
       // Evitar duplicados
-      const exists = messageHistory.private[otherUser].some(m => 
-        m.sender === messageWithTime.sender && 
-        m.text === messageWithTime.text && 
+      const exists = messageHistory.private[otherUser].some(m =>
+        m.sender === messageWithTime.sender &&
+        m.text === messageWithTime.text &&
         m.sent_at === messageWithTime.sent_at
       );
       if (!exists) {
         messageHistory.private[otherUser].push(messageWithTime);
         messageHistory.private[otherUser].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
       }
-      
+
       // Mostrar si estamos en ese chat privado
       if (currentChatType === 'private' && currentChatName === otherUser) {
         chatWindow.addMessage(messageWithTime);
       }
-      
+
     } else if (sub_type === 'group' && group) {
       if (!messageHistory.group[group]) {
         messageHistory.group[group] = [];
       }
-      
+
       // Evitar duplicados
-      const exists = messageHistory.group[group].some(m => 
-        m.sender === messageWithTime.sender && 
-        m.text === messageWithTime.text && 
+      const exists = messageHistory.group[group].some(m =>
+        m.sender === messageWithTime.sender &&
+        m.text === messageWithTime.text &&
         m.sent_at === messageWithTime.sent_at
       );
       if (!exists) {
         messageHistory.group[group].push(messageWithTime);
         messageHistory.group[group].sort((a, b) => new Date(a.sent_at) - new Date(b.sent_at));
       }
-      
+
       if (!chatListContainer.querySelector(`[data-type="group"][data-name="${group}"]`)) {
         chatList.addGroupChat(group);
       }
-      
+
       // Mostrar si estamos en ese grupo
       if (currentChatType === 'group' && currentChatName === group) {
         chatWindow.addMessage(messageWithTime);
       }
     }
-    
+
   } else if (message.type === 'all_users') {
     if (message.users && Array.isArray(message.users)) {
       allUsersList = message.users;
@@ -351,7 +430,7 @@ function processIncomingMessage(message) {
 async function loadChatHistory(type, name) {
   // Limpiar la ventana de chat primero
   chatWindow.chatWindow.innerHTML = '';
-  
+
   // Primero mostrar los mensajes que ya tenemos en memoria
   // Los mensajes ya están ordenados cronológicamente (más antiguos primero)
   if (type === 'general' && messageHistory.general.length > 0) {
@@ -373,7 +452,7 @@ async function loadChatHistory(type, name) {
     // Actualizar contador
     loadedCounts.group[name] = messageHistory.group[name].length;
   }
-  
+
   // Si no hay mensajes en memoria, solicitar al servidor
   let shouldLoadMore = false;
   if (type === 'general') {
@@ -383,7 +462,7 @@ async function loadChatHistory(type, name) {
   } else if (type === 'group') {
     shouldLoadMore = !messageHistory.group[name] || messageHistory.group[name].length === 0;
   }
-  
+
   if (shouldLoadMore) {
     try {
       // Solicitar los primeros 50 mensajes
@@ -396,7 +475,7 @@ async function loadChatHistory(type, name) {
             processIncomingMessage(msg);
           }
         });
-        
+
         // Actualizar contador
         if (type === 'general') {
           loadedCounts.general = response.messages.filter(m => m.type === 'chat').length;
@@ -405,7 +484,7 @@ async function loadChatHistory(type, name) {
         } else if (type === 'group') {
           loadedCounts.group[name] = response.messages.filter(m => m.type === 'chat').length;
         }
-        
+
         // Volver a cargar el historial para mostrarlos
         setTimeout(() => {
           chatWindow.chatWindow.innerHTML = '';
@@ -423,7 +502,7 @@ async function loadChatHistory(type, name) {
               chatWindow.addMessage(msg);
             });
           }
-          
+
           // Mostrar botón de cargar más si hay más mensajes
           if (response.messages.filter(m => m.type === 'chat').length >= 50) {
             chatWindow.showLoadMoreButton();
@@ -447,19 +526,19 @@ async function loadMoreMessages(type, name) {
     } else if (type === 'group') {
       currentCount = loadedCounts.group[name] || 0;
     }
-    
+
     // Cargar 50 mensajes más
     const response = await getChatHistory(type, name, 50, currentCount, sessionId);
     if (response.messages && Array.isArray(response.messages) && response.messages.length > 0) {
       // Guardar el scroll actual
       const scrollHeight = chatWindow.chatWindow.scrollHeight;
       const scrollTop = chatWindow.chatWindow.scrollTop;
-      
+
       // Procesar y agregar mensajes al inicio
       response.messages.forEach(msg => {
         if (msg.type === 'chat') {
           processIncomingMessage(msg);
-          
+
           // Agregar mensaje al inicio de la ventana
           const messageWithTime = {
             sender: msg.sender,
@@ -472,7 +551,7 @@ async function loadMoreMessages(type, name) {
           chatWindow.addMessage(messageWithTime, true);
         }
       });
-      
+
       // Actualizar contador
       if (type === 'general') {
         loadedCounts.general += response.messages.length;
@@ -487,11 +566,11 @@ async function loadMoreMessages(type, name) {
         }
         loadedCounts.group[name] += response.messages.length;
       }
-      
+
       // Restaurar scroll para mantener la posición
       const newScrollHeight = chatWindow.chatWindow.scrollHeight;
       chatWindow.chatWindow.scrollTop = scrollTop + (newScrollHeight - scrollHeight);
-      
+
       // Si no hay más mensajes, ocultar el botón
       if (response.messages.length < 50) {
         chatWindow.hideLoadMoreButton();
@@ -516,7 +595,7 @@ async function startOnlineUsersPolling() {
       console.error('Error obteniendo usuarios online:', error);
     }
   };
-  
+
   await updateUsers();
   setInterval(updateUsers, 5000);
 }
@@ -524,30 +603,30 @@ async function startOnlineUsersPolling() {
 function setupUserAutocomplete() {
   const inviteInput = document.getElementById('inviteUserInput');
   const suggestionsDiv = document.getElementById('userSuggestions');
-  
+
   if (!inviteInput || !suggestionsDiv) return;
-  
+
   inviteInput.addEventListener('input', (e) => {
     const query = e.target.value.trim().toLowerCase();
-    
+
     if (query.length === 0) {
       suggestionsDiv.innerHTML = '';
       suggestionsDiv.style.display = 'none';
       return;
     }
-    
+
     if (!allUsersList || allUsersList.length === 0) {
       suggestionsDiv.innerHTML = '<div class="suggestion-item">No hay usuarios disponibles</div>';
       suggestionsDiv.style.display = 'block';
       return;
     }
-    
-    const filtered = allUsersList.filter(user => 
-      user.toLowerCase().includes(query) && 
+
+    const filtered = allUsersList.filter(user =>
+      user.toLowerCase().includes(query) &&
       user !== currentUsername &&
       !invitedUsers.includes(user)
     );
-    
+
     suggestionsDiv.innerHTML = '';
     filtered.slice(0, 5).forEach(username => {
       const item = document.createElement('div');
@@ -565,7 +644,7 @@ function setupUserAutocomplete() {
     });
     suggestionsDiv.style.display = 'block';
   });
-  
+
   document.addEventListener('click', (e) => {
     if (!inviteInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
       suggestionsDiv.style.display = 'none';
@@ -576,10 +655,10 @@ function setupUserAutocomplete() {
 function updateInvitedUsersList() {
   const invitedDiv = document.getElementById('invitedUsers');
   if (!invitedDiv) return;
-  
+
   invitedDiv.innerHTML = '';
   if (invitedUsers.length === 0) return;
-  
+
   invitedUsers.forEach(username => {
     const tag = document.createElement('div');
     tag.className = 'invited-user-tag';
@@ -606,7 +685,7 @@ window.addEventListener('beforeunload', async () => {
       if (messageStreamConnection) {
         messageStreamConnection.close();
       }
-      
+
       // Enviar desconexión al backend
       await fetch('http://localhost:3000/disconnect', {
         method: 'POST',

@@ -4,6 +4,7 @@
  * This is a general purpose Gradle build.
  * Learn more about Gradle by exploring our Samples at https://docs.gradle.org/9.1.0/samples
  */
+
 subprojects {
     apply plugin: 'java'
 
@@ -15,6 +16,7 @@ subprojects {
         implementation("org.postgresql:postgresql:42.6.0")
         implementation 'com.google.code.gson:gson:2.13.2'
         implementation 'org.mindrot:jbcrypt:0.4'
+        implementation 'com.zeroc:ice:3.7.10'
     }
 
     jar{

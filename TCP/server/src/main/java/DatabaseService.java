@@ -34,7 +34,7 @@ public class DatabaseService {
     public boolean isValidUser(String username, String password) {
         String sql = "SELECT password_hash FROM users WHERE username = ?";
         try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, username);
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
@@ -50,7 +50,7 @@ public class DatabaseService {
     public boolean registerUser(String username, String password) {
         String sql = "INSERT INTO users (username, password_hash) VALUES (?, ?)";
         try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                PreparedStatement pstmt = conn.prepareStatement(sql)) {
             String hashedPassword = BCrypt.hashpw(password, BCrypt.gensalt());
             pstmt.setString(1, username);
             pstmt.setString(2, hashedPassword);
@@ -62,7 +62,7 @@ public class DatabaseService {
     }
 
     public void savePublicMessage(String sender, String text) {
-        String sql = "INSERT INTO public_messages (sender_username, message_text, message_type) VALUES (?, ?, 'TEXT')";
+        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, 'TEXT')";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, text);
@@ -71,27 +71,28 @@ public class DatabaseService {
             System.err.println("Error al guardar mensaje público: " + e.getMessage());
         }
     }
-    
+
     public List<String> getPublicMessages(int limit) {
         return getPublicMessages(limit, 0);
     }
-    
+
     public List<String> getPublicMessages(int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type, sent_at FROM public_messages ORDER BY sent_at ASC LIMIT ? OFFSET ?";
+        String sql = "SELECT sender_username, message_content, message_type, sent_at FROM public_messages ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setInt(1, limit);
             pstmt.setInt(2, offset);
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 String sentAt = rs.getTimestamp("sent_at").toString();
                 if ("AUDIO".equals(type)) {
-                     messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(), null, sentAt));
+                    messages.add(createChatMessage("public_audio", sender, sender, new java.io.File(content).getName(),
+                            null, sentAt));
                 } else {
-                     messages.add(createChatMessage("public", sender, sender, content, null, sentAt));
+                    messages.add(createChatMessage("public", sender, sender, content, null, sentAt));
                 }
             }
         } catch (SQLException e) {
@@ -141,7 +142,7 @@ public class DatabaseService {
             return false;
         }
     }
-    
+
     public boolean removeUserFromGroup(String username, String groupName) {
         String sql = "DELETE FROM group_members WHERE username = ? AND group_name = ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -163,24 +164,24 @@ public class DatabaseService {
             return false;
         }
     }
-    
+
     public boolean isGroup(String name) {
         String sql = "SELECT 1 FROM chat_groups WHERE group_name = ?";
-         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, name);
             return pstmt.executeQuery().next();
         } catch (SQLException e) {
             return false;
         }
     }
-    
+
     public List<String> getGroupMembers(String groupName) {
         List<String> members = new ArrayList<>();
         String sql = "SELECT username FROM group_members WHERE group_name = ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             ResultSet rs = pstmt.executeQuery();
-            while(rs.next()) {
+            while (rs.next()) {
                 members.add(rs.getString("username"));
             }
         } catch (SQLException e) {
@@ -188,9 +189,9 @@ public class DatabaseService {
         }
         return members;
     }
-    
+
     public void saveGroupMessage(String sender, String groupName, String content, String type) {
-        String sql = "INSERT INTO group_messages (sender_username, group_name, message_text, message_type) VALUES (?, ?, ?, ?)";
+        String sql = "INSERT INTO group_messages (sender_username, group_name, message_content, message_type) VALUES (?, ?, ?, ?)";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, groupName);
@@ -205,10 +206,10 @@ public class DatabaseService {
     public List<String> getGroupMessages(String groupName, int limit) {
         return getGroupMessages(groupName, limit, 0);
     }
-    
+
     public List<String> getGroupMessages(String groupName, int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, message_text, message_type, sent_at FROM group_messages WHERE group_name = ? ORDER BY sent_at ASC LIMIT ? OFFSET ?";
+        String sql = "SELECT sender_username, message_content, message_type, sent_at FROM group_messages WHERE group_name = ? ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, groupName);
             pstmt.setInt(2, limit);
@@ -216,11 +217,12 @@ public class DatabaseService {
             ResultSet rs = pstmt.executeQuery();
             while (rs.next()) {
                 String sender = rs.getString("sender_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 String sentAt = rs.getTimestamp("sent_at").toString();
                 if ("AUDIO".equals(type)) {
-                    messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(), groupName, sentAt));
+                    messages.add(createChatMessage("group_audio", sender, null, new java.io.File(content).getName(),
+                            groupName, sentAt));
                 } else {
                     messages.add(createChatMessage("group", sender, null, content, groupName, sentAt));
                 }
@@ -230,10 +232,10 @@ public class DatabaseService {
         }
         return messages;
     }
-    
+
     public void savePrivateMessage(String sender, String recipient, String content, String type) {
-        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_text, message_type) VALUES (?, ?, ?, ?)";
-         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        String sql = "INSERT INTO private_messages (sender_username, recipient_username, message_content, message_type) VALUES (?, ?, ?, ?)";
+        try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, recipient);
             pstmt.setString(3, content);
@@ -247,10 +249,10 @@ public class DatabaseService {
     public List<String> getPrivateMessages(String user1, String user2, int limit) {
         return getPrivateMessages(user1, user2, limit, 0);
     }
-    
+
     public List<String> getPrivateMessages(String user1, String user2, int limit, int offset) {
         List<String> messages = new ArrayList<>();
-        String sql = "SELECT sender_username, recipient_username, message_text, message_type, sent_at FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at ASC LIMIT ? OFFSET ?";
+        String sql = "SELECT sender_username, recipient_username, message_content, message_type, sent_at FROM private_messages WHERE (sender_username = ? AND recipient_username = ?) OR (sender_username = ? AND recipient_username = ?) ORDER BY sent_at ASC LIMIT ? OFFSET ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, user1);
             pstmt.setString(2, user2);
@@ -259,16 +261,17 @@ public class DatabaseService {
             pstmt.setInt(5, limit);
             pstmt.setInt(6, offset);
             ResultSet rs = pstmt.executeQuery();
-            while(rs.next()){
+            while (rs.next()) {
                 String sender = rs.getString("sender_username");
                 String recipient = rs.getString("recipient_username");
-                String content = rs.getString("message_text");
+                String content = rs.getString("message_content");
                 String type = rs.getString("message_type");
                 String sentAt = rs.getTimestamp("sent_at").toString();
                 String subType = sender.equals(user1) ? "private_to" : "private_from";
                 String party = sender.equals(user1) ? recipient : sender;
                 if ("AUDIO".equals(type)) {
-                    messages.add(createChatMessage(subType + "_audio", sender, party, new java.io.File(content).getName(), null, sentAt));
+                    messages.add(createChatMessage(subType + "_audio", sender, party,
+                            new java.io.File(content).getName(), null, sentAt));
                 } else {
                     messages.add(createChatMessage(subType, sender, party, content, null, sentAt));
                 }
@@ -279,12 +282,11 @@ public class DatabaseService {
         return messages;
     }
 
-
     public List<String> getPrivateChatPartners(String username) {
         List<String> partners = new ArrayList<>();
         String sql = "SELECT DISTINCT recipient_username FROM private_messages WHERE sender_username = ? " +
-                     "UNION " +
-                     "SELECT DISTINCT sender_username FROM private_messages WHERE recipient_username = ?";
+                "UNION " +
+                "SELECT DISTINCT sender_username FROM private_messages WHERE recipient_username = ?";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, username);
             pstmt.setString(2, username);
@@ -313,7 +315,8 @@ public class DatabaseService {
         return groups;
     }
 
-    private String createChatMessage(String subType, String sender, String party, String text, String group, String sentAt) {
+    private String createChatMessage(String subType, String sender, String party, String text, String group,
+            String sentAt) {
         Gson gson = new Gson();
         JsonObject json = new JsonObject();
         json.addProperty("type", "chat");
@@ -329,12 +332,12 @@ public class DatabaseService {
         }
         return gson.toJson(json);
     }
-    
+
     // Método sobrecargado para compatibilidad
     private String createChatMessage(String subType, String sender, String party, String text, String group) {
         return createChatMessage(subType, sender, party, text, group, null);
     }
-    
+
     public List<String> getAllUsers() {
         List<String> users = new ArrayList<>();
         String sql = "SELECT username FROM users ORDER BY username";
@@ -349,4 +352,3 @@ public class DatabaseService {
         return users;
     }
 }
-

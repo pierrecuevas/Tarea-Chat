@@ -1,0 +1,21 @@
+{
+    "name": "chat-web-client",
+    "version": "1.0.0",
+    "description": "Web client for chat application with voice support",
+    "type": "module",
+    "scripts": {
+        "dev": "webpack serve --mode development",
+        "build": "webpack --mode production"
+    },
+    "dependencies": {
+        "ice": "^3.7.9"
+    },
+    "devDependencies": {
+        "webpack": "^5.89.0",
+        "webpack-cli": "^5.1.4",
+        "webpack-dev-server": "^4.15.1",
+        "copy-webpack-plugin": "^11.0.0",
+        "style-loader": "^3.3.3",
+        "css-loader": "^6.8.1"
+    }
+}

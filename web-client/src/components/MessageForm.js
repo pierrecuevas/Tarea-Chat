@@ -2,6 +2,7 @@ export default class MessageForm {
   constructor(container, currentChat) {
     this.container = container;
     this.onMessageSent = null;
+    this.onVoiceRecord = null;
     this.currentChat = currentChat || null;
     this.render();
   }
@@ -14,12 +15,12 @@ export default class MessageForm {
   updatePlaceholder() {
     const input = this.container.querySelector('#messageText');
     const sendButton = this.container.querySelector('#sendButton');
-    
+
     if (this.currentChat) {
       // Habilitar input y botón
       input.disabled = false;
       if (sendButton) sendButton.disabled = false;
-      
+
       if (this.currentChat.type === 'group') {
         input.placeholder = `Escribe un mensaje a ${this.currentChat.name}...`;
       } else if (this.currentChat.type === 'private') {
@@ -45,34 +46,47 @@ export default class MessageForm {
             required 
             autocomplete="off"
           />
+          <button type="button" class="voice-button" id="voiceButton" title="Grabar nota de voz">
+            <span class="voice-icon">🎤</span>
+          </button>
           <button type="submit" class="send-button" id="sendButton">
             <span class="send-icon">🚀</span>
           </button>
         </div>
       </form>
     `;
-    
+
     const form = this.container.querySelector('#messageForm');
     const input = this.container.querySelector('#messageText');
     const sendButton = this.container.querySelector('#sendButton');
-    
+    const voiceButton = this.container.querySelector('#voiceButton');
+
     if (!this.currentChat) {
       input.disabled = true;
       sendButton.disabled = true;
     }
 
+    if (voiceButton) {
+      voiceButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (this.onVoiceRecord) {
+          this.onVoiceRecord();
+        }
+      });
+    }
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (!this.currentChat) return;
-      
+
       const text = input.value.trim();
       if (!text) return;
 
-      const message = { 
+      const message = {
         command: this.getCommandForChat(),
-        text 
+        text
       };
-      
+
       if (this.currentChat.type === 'private') {
         message.recipient = this.currentChat.name;
       } else if (this.currentChat.type === 'group') {
