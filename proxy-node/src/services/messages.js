@@ -22,7 +22,7 @@ function readTCPMessage(clientSocket) {
     };
 
     clientSocket.on('data', onData);
-    
+
     setTimeout(() => {
       clientSocket.removeListener('data', onData);
       reject(new Error('Timeout waiting for TCP response'));
@@ -50,13 +50,19 @@ async function sendMessageHandler(req, res) {
     return res.status(401).json({ success: false, message: 'Invalid session' });
   }
 
-  const { command, text, recipient, group_name } = req.body;
-  
+  const { command, text, recipient, group_name, type, to, sdp, candidate } = req.body;
+
   try {
     const message = { command, text };
     if (recipient) message.recipient = recipient;
     if (group_name) message.group_name = group_name;
-    
+
+    // WebRTC fields
+    if (type) message.type = type;
+    if (to) message.to = to;
+    if (sdp) message.sdp = sdp;
+    if (candidate) message.candidate = candidate;
+
     // Enviar mensaje al servidor TCP
     session.socket.write(JSON.stringify(message) + '\n');
     // No esperamos respuesta, el servidor enviará el mensaje a través del stream
@@ -78,23 +84,23 @@ async function getChatHistoryHandler(req, res) {
   }
 
   const { type, name, limit, offset } = req.body;
-  
+
   try {
-    const message = { 
+    const message = {
       command: 'get_chat_history',
       type: type || 'general',
       name: name || 'General',
       limit: limit || 50,
       offset: offset || 0
     };
-    
+
     // Enviar mensaje al servidor TCP y esperar respuesta
     const response = await sendTCPMessage(session.socket, message);
-    
+
     // La respuesta viene como chat_history_response con un array de mensajes
     if (response.type === 'chat_history_response') {
-      res.json({ 
-        success: true, 
+      res.json({
+        success: true,
         messages: response.messages || [],
         chat_type: response.chat_type,
         chat_name: response.chat_name

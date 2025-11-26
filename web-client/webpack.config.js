@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default {
   mode: 'development',
-  entry: './index.js',
+  entry: './src/main.js',
   output: {
     filename: 'index.js',
     path: path.resolve(__dirname, 'dist'),
@@ -19,7 +19,7 @@ export default {
         test: /\.css$/i,
         use: ['style-loader', 'css-loader'],
       },
-      
+
     ],
   },
   plugins: [
@@ -27,7 +27,7 @@ export default {
       patterns: [
         { from: 'extLibs', to: 'extLibs' }, // Copia toda la carpeta
         { from: 'index.html', to: '.' }, // Copia el HTML raíz
-        { from: 'index.css', to: '.' }, 
+        { from: 'index.css', to: '.' },
       ],
     }),
   ],
@@ -43,6 +43,8 @@ export default {
       directory: path.join(__dirname, 'dist'),
     },
     historyApiFallback: true,
-    port: 3000,
+    port: 3123,
+    allowedHosts: 'all',
+    host: '0.0.0.0',
   },
 };

@@ -31,9 +31,9 @@ export default class LoginForm {
       const endpoint = this.isLogin ? 'login' : 'register';
 
       try {
-        const res = await fetch(`http://localhost:3000/${endpoint}`, {
+        const res = await fetch(`http://${window.location.hostname}:3000/${endpoint}`, {
           method: 'POST',
-          headers: {'Content-Type': 'application/json'},
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
         });
         const json = await res.json();

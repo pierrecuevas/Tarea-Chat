@@ -36,7 +36,7 @@ export default class ChatWindow {
     this.loadMoreBtn = this.container.querySelector('#loadMoreBtn');
     this.leaveGroupBtn = this.container.querySelector('#leaveGroupBtn');
     this.onLeaveGroup = null;
-    
+
     // Configurar el botón de cargar más
     if (this.loadMoreBtn) {
       this.loadMoreBtn.addEventListener('click', () => {
@@ -50,7 +50,7 @@ export default class ChatWindow {
         }
       });
     }
-    
+
     // Configurar el botón de salir del grupo
     if (this.leaveGroupBtn) {
       this.leaveGroupBtn.addEventListener('click', () => {
@@ -60,7 +60,7 @@ export default class ChatWindow {
       });
     }
   }
-  
+
   setupScrollListener() {
     if (this.chatWindow) {
       this.chatWindow.addEventListener('scroll', () => {
@@ -73,19 +73,19 @@ export default class ChatWindow {
       });
     }
   }
-  
+
   showLoadMoreButton() {
     if (this.loadMoreButton) {
       this.loadMoreButton.style.display = 'block';
     }
   }
-  
+
   hideLoadMoreButton() {
     if (this.loadMoreButton) {
       this.loadMoreButton.style.display = 'none';
     }
   }
-  
+
   setOnLoadMore(callback) {
     this.onLoadMore = callback;
   }
@@ -95,7 +95,7 @@ export default class ChatWindow {
     const icon = type === 'group' ? '👥' : type === 'private' ? '👤' : '🌐';
     this.chatTitle.textContent = name;
     this.chatTitle.parentElement.querySelector('.chat-title-icon').textContent = icon;
-    
+
     // Mostrar/ocultar botón de salir del grupo
     if (this.leaveGroupBtn) {
       if (type === 'group') {
@@ -105,7 +105,7 @@ export default class ChatWindow {
       }
     }
   }
-  
+
   setOnLeaveGroup(callback) {
     this.onLeaveGroup = callback;
   }
@@ -118,26 +118,26 @@ export default class ChatWindow {
 
     const msgElem = document.createElement('div');
     msgElem.className = 'message';
-    
+
     // Determinar si el mensaje es propio
-    const isOwn = 
+    const isOwn =
       (message.sub_type === 'public' && message.sender === window.currentUsername) ||
       (message.sub_type === 'private_to') ||
       (message.sub_type === 'group' && message.sender === window.currentUsername) ||
       (message.sub_type?.includes('to') && message.sub_type !== 'private_from');
-    
+
     msgElem.classList.add(isOwn ? 'message-own' : 'message-other');
-    
+
     // **FORMATO DE FECHA Y HORA**
-    let timeDisplay = new Date().toLocaleString('es-CO', { 
+    let timeDisplay = new Date().toLocaleString('es-CO', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
-      hour: '2-digit', 
+      hour: '2-digit',
       minute: '2-digit',
       hour12: true
     });
-    
+
     if (message.sent_at) {
       try {
         const sentDate = new Date(message.sent_at);
@@ -145,21 +145,21 @@ export default class ChatWindow {
         if (!isNaN(sentDate.getTime())) {
           const today = new Date();
           const isToday = sentDate.toDateString() === today.toDateString();
-          
+
           if (isToday) {
             // Si es hoy, solo mostrar la hora
-            timeDisplay = sentDate.toLocaleTimeString('es-CO', { 
-              hour: '2-digit', 
+            timeDisplay = sentDate.toLocaleTimeString('es-CO', {
+              hour: '2-digit',
               minute: '2-digit',
               hour12: true
             });
           } else {
             // Si es otro día, mostrar fecha y hora
-            timeDisplay = sentDate.toLocaleString('es-CO', { 
+            timeDisplay = sentDate.toLocaleString('es-CO', {
               day: '2-digit',
               month: '2-digit',
               year: 'numeric',
-              hour: '2-digit', 
+              hour: '2-digit',
               minute: '2-digit',
               hour12: true
             });
@@ -169,15 +169,51 @@ export default class ChatWindow {
         console.error('Error parseando fecha:', e);
       }
     }
-    
+
+    // Detect audio message
+    const isAudio =
+      message.sub_type === 'public_audio' ||
+      message.sub_type === 'group_audio' ||
+      message.sub_type === 'private_audio_from' ||
+      message.sub_type === 'private_audio_to' ||
+      (message.text && message.text.endsWith('.webm')) ||
+      (message.message && message.message.endsWith('.webm'));
+
+    let contentHtml = '';
+    if (isAudio) {
+      // Extract filename
+      const filename = message.text || message.message;
+      // Construct URL for the new HTTP audio server
+      // Using window.location.hostname to support access from other devices
+      const audioUrl = `http://${window.location.hostname}:3001/audio/${filename}`;
+
+      // Create a placeholder for the audio player
+      // We will mount the AudioPlayer component after inserting the HTML
+      const audioId = `audio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      contentHtml = `<div id="${audioId}" class="audio-message-container"></div>`;
+
+      // Defer mounting the AudioPlayer until after the element is in the DOM
+      setTimeout(() => {
+        const container = document.getElementById(audioId);
+        if (container) {
+          import('./AudioPlayer.js').then(module => {
+            const AudioPlayer = module.default;
+            new AudioPlayer(container, audioUrl, message);
+          }).catch(err => console.error("Failed to load AudioPlayer", err));
+        }
+      }, 0);
+    } else {
+      contentHtml = this.escapeHtml(message.text || message.message || '');
+    }
+
     msgElem.innerHTML = `
       <div class="message-header">
         <span class="message-sender">${message.sender || 'Sistema'}</span>
         <span class="message-time">${timeDisplay}</span>
       </div>
-      <div class="message-content">${this.escapeHtml(message.text || message.message || '')}</div>
+      <div class="message-content">${contentHtml}</div>
     `;
-    
+
     // Si prepend es true, agregar al inicio (para cargar más mensajes)
     if (prepend) {
       const loadMoreButton = this.chatWindow.querySelector('#loadMoreButton');
@@ -204,7 +240,7 @@ export default class ChatWindow {
     sysMsg.innerHTML = `
       <div class="message-content">${this.escapeHtml(text)}</div>
     `;
-    
+
     this.chatWindow.appendChild(sysMsg);
     this.chatWindow.scrollTop = this.chatWindow.scrollHeight;
   }

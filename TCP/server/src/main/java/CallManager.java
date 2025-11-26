@@ -21,6 +21,8 @@ public class CallManager {
     }
 
     public void endCall(String username) {
+        if (username == null)
+            return;
         String partner = activeCalls.remove(username);
         if (partner != null) {
             activeCalls.remove(partner);
@@ -38,17 +40,17 @@ public class CallManager {
         }
         return null;
     }
-    
+
     public String getCallPartner(String username) {
         return activeCalls.get(username);
     }
-    
+
     private String findUsernameByUdpAddress(SocketAddress address) {
         return userUdpAddresses.entrySet().stream()
-            .filter(entry -> entry.getValue().equals(address))
-            .map(java.util.Map.Entry::getKey)
-            .findFirst()
-            .orElse(null);
+                .filter(entry -> entry.getValue().equals(address))
+                .map(java.util.Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
     }
 
     public void userDisconnected(String username) {
@@ -56,4 +58,3 @@ public class CallManager {
         userUdpAddresses.remove(username);
     }
 }
-

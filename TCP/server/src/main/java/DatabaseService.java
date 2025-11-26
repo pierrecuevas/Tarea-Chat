@@ -62,10 +62,15 @@ public class DatabaseService {
     }
 
     public void savePublicMessage(String sender, String text) {
-        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, 'TEXT')";
+        savePublicMessage(sender, text, "TEXT");
+    }
+
+    public void savePublicMessage(String sender, String text, String type) {
+        String sql = "INSERT INTO public_messages (sender_username, message_content, message_type) VALUES (?, ?, ?)";
         try (Connection conn = getConnection(); PreparedStatement pstmt = conn.prepareStatement(sql)) {
             pstmt.setString(1, sender);
             pstmt.setString(2, text);
+            pstmt.setString(3, type);
             pstmt.executeUpdate();
         } catch (SQLException e) {
             System.err.println("Error al guardar mensaje público: " + e.getMessage());
@@ -270,7 +275,9 @@ public class DatabaseService {
                 String subType = sender.equals(user1) ? "private_to" : "private_from";
                 String party = sender.equals(user1) ? recipient : sender;
                 if ("AUDIO".equals(type)) {
-                    messages.add(createChatMessage(subType + "_audio", sender, party,
+                    // Convert private_to -> private_audio_to, private_from -> private_audio_from
+                    String audioSubType = subType.replace("private_", "private_audio_");
+                    messages.add(createChatMessage(audioSubType, sender, party,
                             new java.io.File(content).getName(), null, sentAt));
                 } else {
                     messages.add(createChatMessage(subType, sender, party, content, null, sentAt));

@@ -9,6 +9,12 @@ export class VoiceChatClient {
         this.recordingMode = 'message'; // 'message' or 'call'
         this.audioChunks = [];
         this.currentRecipient = null;
+
+        // WebRTC properties
+        this.peerConnection = null;
+        this.localStream = null;
+        this.remoteAudio = null;
+        this.onSignalingMessage = null; // Callback for sending signaling messages
     }
 
     async initialize() {
@@ -26,8 +32,9 @@ export class VoiceChatClient {
 
             this.communicator = Ice.initialize(initData);
 
-            // Create proxy to the server
-            const proxyString = "VoiceChat:ws -h localhost -p 10000";
+            // Create proxy to the server - use current hostname for network access
+            const serverHost = window.location.hostname;
+            const proxyString = `VoiceChat:ws -h ${serverHost} -p 10000`;
             console.log("Connecting to:", proxyString);
             const base = this.communicator.stringToProxy(proxyString);
 
@@ -131,39 +138,36 @@ export class VoiceChatClient {
         }
     }
 
-    async startCall(recipient) {
+    async startCall(recipient, isInitiator = true) {
         if (this.isInCall || this.isRecording) return;
 
-        this.recordingMode = 'call';
         this.currentRecipient = recipient;
         this.isInCall = true;
 
         try {
-            // Initiate call on server
-            await this.proxy.initiateCall(recipient);
+            // Initiate call on server (for notification)
+            if (isInitiator) {
+                await this.proxy.initiateCall(recipient);
+            }
 
-            // Start streaming audio
-            this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            this.mediaRecorder = new MediaRecorder(this.mediaStream, {
-                mimeType: 'audio/webm;codecs=opus'
-            });
+            // Import WebRTC helper
+            const { WebRTCMethods } = await import('./webrtc-helper.js');
 
-            this.mediaRecorder.ondataavailable = async (event) => {
-                if (event.data.size > 0 && this.proxy && this.isInCall) {
-                    const buffer = await event.data.arrayBuffer();
-                    const bytes = new Uint8Array(buffer);
-                    // Stream audio chunks in real-time
-                    this.proxy.sendAudio(bytes);
-                }
-            };
+            // Initialize WebRTC peer connection
+            await WebRTCMethods.initializePeerConnection(this, recipient);
 
-            // Send data every 100ms for real-time streaming
-            this.mediaRecorder.start(100);
-            console.log("Call started with:", recipient);
+            // If we're the initiator, create and send offer
+            if (isInitiator) {
+                await WebRTCMethods.createOffer(this, recipient);
+            }
+
+            console.log(`📞 WebRTC call ${isInitiator ? 'initiated' : 'accepted'} with:`, recipient);
 
         } catch (e) {
-            console.error("Error starting call:", e);
+            console.error("Error starting WebRTC call:", e);
             this.isInCall = false;
+            // Show error to user via alert or console (since we don't have direct access to chatWindow here)
+            alert("Error al iniciar llamada: " + e.message);
         }
     }
 
@@ -175,16 +179,13 @@ export class VoiceChatClient {
                 await this.proxy.endCall(this.currentRecipient);
             }
 
-            if (this.mediaRecorder) {
-                this.mediaRecorder.stop();
-            }
-            if (this.mediaStream) {
-                this.mediaStream.getTracks().forEach(track => track.stop());
-            }
+            // Close WebRTC connection
+            const { WebRTCMethods } = await import('./webrtc-helper.js');
+            WebRTCMethods.closeConnection(this);
 
             this.isInCall = false;
             this.currentRecipient = null;
-            console.log("Call ended");
+            console.log("📞 Call ended");
 
         } catch (e) {
             console.error("Error ending call:", e);
@@ -194,10 +195,48 @@ export class VoiceChatClient {
     async acceptCall(caller) {
         try {
             await this.proxy.acceptCall(caller);
-            await this.startCall(caller);
+            // Start call as non-initiator (will wait for offer)
+            await this.startCall(caller, false);
         } catch (e) {
             console.error("Error accepting call:", e);
         }
+    }
+
+    // WebRTC Signaling Handlers
+    async handleWebRTCOffer(offer, from) {
+        try {
+            const { WebRTCMethods } = await import('./webrtc-helper.js');
+            await WebRTCMethods.handleOffer(this, offer, from);
+            console.log('📞 Handled WebRTC offer from:', from);
+        } catch (e) {
+            console.error('Error handling WebRTC offer:', e);
+        }
+    }
+
+    async handleWebRTCAnswer(answer) {
+        try {
+            const { WebRTCMethods } = await import('./webrtc-helper.js');
+            await WebRTCMethods.handleAnswer(this, answer);
+            console.log('📞 Handled WebRTC answer');
+        } catch (e) {
+            console.error('Error handling WebRTC answer:', e);
+        }
+    }
+
+    async handleICECandidate(candidate) {
+        try {
+            const { WebRTCMethods } = await import('./webrtc-helper.js');
+            await WebRTCMethods.handleIceCandidate(this, candidate);
+        } catch (e) {
+            console.error('Error handling ICE candidate:', e);
+        }
+    }
+
+    async playAudioPacket(base64Data) {
+        // NOTE: Real-time audio playback of WebM chunks is not possible
+        // WebM requires complete container headers to decode
+        // Solutions: WebRTC, PCM raw audio, or accumulate & play at end
+        console.log('📞 Call audio packet received (playback not implemented - see call_audio_limitation.md)');
     }
 
     async rejectCall(caller) {

@@ -1,4 +1,3 @@
-
 import com.zeroc.Ice.Current;
 
 import demo.VoiceChat;
@@ -28,8 +27,16 @@ public class VoiceChatI implements VoiceChat {
     @Override
     public void sendAudio(byte[] data, Current current) {
         // For real-time call audio streaming
-        System.out.println("Received real-time audio data: " + data.length + " bytes");
-        // TODO: Broadcast to call participant
+        String sender = current.id.name;
+        String recipient = activeCalls.get(sender);
+
+        if (recipient != null) {
+            try {
+                ChatController.getInstance().streamAudioToUser(recipient, data);
+            } catch (Exception e) {
+                System.err.println("Error relaying audio: " + e.getMessage());
+            }
+        }
     }
 
     @Override
@@ -51,8 +58,12 @@ public class VoiceChatI implements VoiceChat {
             System.out.println("Saved voice message: " + filename +
                     " (" + data.length + " bytes, " + info.duration + "ms)");
 
-            // TODO: Save metadata to database
-            // TODO: Notify recipient
+            // Notify recipient and save metadata via ChatController
+            try {
+                ChatController.getInstance().processAudioMessage(info.sender, info.recipient, filePath.toString());
+            } catch (Exception e) {
+                System.err.println("Error notifying ChatController: " + e.getMessage());
+            }
 
             return filename;
 
@@ -67,14 +78,25 @@ public class VoiceChatI implements VoiceChat {
         String caller = current.id.name; // Get caller from ICE context
         System.out.println("Call initiated: " + caller + " -> " + recipient);
         activeCalls.put(caller, recipient);
-        // TODO: Notify recipient of incoming call
+
+        try {
+            ChatController.getInstance().requestCall(caller, recipient);
+        } catch (Exception e) {
+            System.err.println("Error initiating call via ChatController: " + e.getMessage());
+        }
     }
 
     @Override
     public void acceptCall(String caller, Current current) {
         String recipient = current.id.name;
         System.out.println("Call accepted: " + caller + " <-> " + recipient);
-        // TODO: Establish audio stream
+        activeCalls.put(recipient, caller); // Add reverse mapping for bidirectional audio
+
+        try {
+            ChatController.getInstance().acceptCall(recipient, caller);
+        } catch (Exception e) {
+            System.err.println("Error accepting call via ChatController: " + e.getMessage());
+        }
     }
 
     @Override
@@ -82,7 +104,12 @@ public class VoiceChatI implements VoiceChat {
         String recipient = current.id.name;
         System.out.println("Call rejected: " + caller + " X " + recipient);
         activeCalls.remove(caller);
-        // TODO: Notify caller of rejection
+
+        try {
+            ChatController.getInstance().rejectCall(recipient, caller);
+        } catch (Exception e) {
+            System.err.println("Error rejecting call via ChatController: " + e.getMessage());
+        }
     }
 
     @Override
@@ -90,7 +117,12 @@ public class VoiceChatI implements VoiceChat {
         System.out.println("Call ended with: " + participant);
         activeCalls.remove(participant);
         activeCalls.remove(current.id.name);
-        // TODO: Clean up audio streams
+
+        try {
+            ChatController.getInstance().endCall(current.id.name);
+        } catch (Exception e) {
+            System.err.println("Error ending call via ChatController: " + e.getMessage());
+        }
     }
 
 }

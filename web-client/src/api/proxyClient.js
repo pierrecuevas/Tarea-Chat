@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = `http://${window.location.hostname}:3000`;
 
 export async function createGroup(groupName, sessionId) {
   const res = await fetch(`${BASE_URL}/create-group`, {

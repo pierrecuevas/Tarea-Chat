@@ -11,6 +11,11 @@ export default class AudioPlayer {
     render() {
         const playerDiv = document.createElement('div');
         playerDiv.className = 'audio-player';
+
+        // Provide defaults for missing data
+        const duration = this.messageInfo?.duration || 0;
+        const timestamp = this.messageInfo?.sent_at || this.messageInfo?.timestamp || new Date().toISOString();
+
         playerDiv.innerHTML = `
             <div class="audio-player-content">
                 <button class="audio-play-btn" id="playBtn">
@@ -24,16 +29,24 @@ export default class AudioPlayer {
                         <div class="waveform-bar"></div>
                         <div class="waveform-bar"></div>
                     </div>
-                    <div class="audio-duration">${this.formatDuration(this.messageInfo.duration)}</div>
+                    <div class="audio-duration">${this.formatDuration(duration)}</div>
                 </div>
             </div>
-            <div class="audio-timestamp">${this.formatTimestamp(this.messageInfo.timestamp)}</div>
+            <div class="audio-timestamp">${this.formatTimestamp(timestamp)}</div>
         `;
 
         this.container.appendChild(playerDiv);
 
         // Setup audio element
         this.audio = new Audio(this.audioUrl);
+        console.log('AudioPlayer created with URL:', this.audioUrl);
+
+        // Add error listener
+        this.audio.addEventListener('error', (e) => {
+            console.error('Audio loading error:', e);
+            console.error('Audio error code:', this.audio.error?.code);
+            console.error('Audio error message:', this.audio.error?.message);
+        });
 
         // Setup play button
         const playBtn = playerDiv.querySelector('#playBtn');
@@ -53,7 +66,12 @@ export default class AudioPlayer {
             this.audio.pause();
             playBtn.textContent = '▶️';
         } else {
-            this.audio.play();
+            console.log('Attempting to play audio from:', this.audioUrl);
+            this.audio.play().catch(err => {
+                console.error('Error playing audio:', err);
+                console.error('Audio URL:', this.audioUrl);
+                alert('No se pudo reproducir el audio. Verifica que el archivo existe.');
+            });
             playBtn.textContent = '⏸️';
         }
 

@@ -30,7 +30,7 @@ public class ClientHandler implements Runnable {
                 }
             }
         } catch (IOException e) {
-            
+
         } finally {
             if (this.username != null) {
                 chatController.userLogout(this.username);
@@ -54,62 +54,66 @@ public class ClientHandler implements Runnable {
                         chatController.sendInitialHistoryToUser(this);
                         return true;
                     } else {
-                        sendMessage("{\"status\": \"error\", \"message\": \"Credenciales incorrectas o usuario ya conectado.\"}");
+                        sendMessage(
+                                "{\"status\": \"error\", \"message\": \"Credenciales incorrectas o usuario ya conectado.\"}");
                     }
                 } else if ("register".equals(command)) {
-                     if (chatController.registerUser(user, pass)) {
-                         if (chatController.loginUser(user, pass, this)) {
+                    if (chatController.registerUser(user, pass)) {
+                        if (chatController.loginUser(user, pass, this)) {
                             sendMessage("{\"status\": \"ok\", \"message\": \"Registro y login exitosos.\"}");
                             chatController.sendInitialHistoryToUser(this);
                             return true;
-                         } else {
-                            sendMessage("{\"status\": \"error\", \"message\": \"Registro exitoso, pero el login automático falló. Intenta iniciar sesión manualmente.\"}");
-                         }
+                        } else {
+                            sendMessage(
+                                    "{\"status\": \"error\", \"message\": \"Registro exitoso, pero el login automático falló. Intenta iniciar sesión manualmente.\"}");
+                        }
                     } else {
                         sendMessage("{\"status\": \"error\", \"message\": \"El nombre de usuario ya existe.\"}");
                     }
                 }
             } catch (JsonSyntaxException | NullPointerException e) {
-                 sendMessage("{\"status\": \"error\", \"message\": \"Petición de autenticación mal formada.\"}");
+                sendMessage("{\"status\": \"error\", \"message\": \"Petición de autenticación mal formada.\"}");
             }
         }
         return false;
     }
 
-
     private void processMessage(String jsonMessage) {
         try {
             JsonObject message = gson.fromJson(jsonMessage, JsonObject.class);
-            
+
             // Verificar que el mensaje tenga el campo "command"
             if (!message.has("command")) {
                 System.err.println("Mensaje sin comando recibido: " + jsonMessage);
                 return;
             }
-            
+
             String command = message.get("command").getAsString();
 
             switch (command) {
                 case "send_audio":
-                    handleAudioUpload(message); 
+                    handleAudioUpload(message);
                     break;
-                case "request_audio": 
-                    handleAudioRequest(message); 
+                case "request_audio":
+                    handleAudioRequest(message);
                     break;
                 case "public_message":
                     chatController.processPublicMessage(this.username, message.get("text").getAsString());
                     break;
                 case "private_message":
-                    chatController.processPrivateMessage(this.username, message.get("recipient").getAsString(), message.get("text").getAsString());
+                    chatController.processPrivateMessage(this.username, message.get("recipient").getAsString(),
+                            message.get("text").getAsString());
                     break;
                 case "group_message":
-                    chatController.processGroupMessage(this.username, message.get("group_name").getAsString(), message.get("text").getAsString());
+                    chatController.processGroupMessage(this.username, message.get("group_name").getAsString(),
+                            message.get("text").getAsString());
                     break;
                 case "create_group":
                     chatController.createGroup(this.username, message.get("group_name").getAsString());
                     break;
                 case "invite_to_group":
-                    chatController.inviteToGroup(this.username, message.get("group_name").getAsString(), message.get("user_to_invite").getAsString());
+                    chatController.inviteToGroup(this.username, message.get("group_name").getAsString(),
+                            message.get("user_to_invite").getAsString());
                     break;
                 case "leave_group":
                     chatController.leaveGroup(this.username, message.get("group_name").getAsString());
@@ -132,6 +136,12 @@ public class ClientHandler implements Runnable {
                 case "call_hangup":
                     chatController.endCall(this.username);
                     break;
+                case "webrtc_offer":
+                case "webrtc_answer":
+                case "ice_candidate":
+                    // Forward WebRTC signaling messages to recipient
+                    handleWebRTCSignaling(message);
+                    break;
                 case "get_all_users":
                     handleGetAllUsers();
                     break;
@@ -151,12 +161,14 @@ public class ClientHandler implements Runnable {
         try {
             long fileSize = message.get("file_size").getAsLong();
             String fileName = message.get("file_name").getAsString();
-            
+
             // Llamar al controlador para que lea los bytes del stream del socket
-            String savedFilePath = chatController.saveAudioFile(this.username, fileName, clientSocket.getInputStream(), fileSize);
-            
+            String savedFilePath = chatController.saveAudioFile(this.username, fileName, clientSocket.getInputStream(),
+                    fileSize);
+
             if (savedFilePath != null) {
-                chatController.processAudioMessage(this.username, message.get("recipient").getAsString(), savedFilePath);
+                chatController.processAudioMessage(this.username, message.get("recipient").getAsString(),
+                        savedFilePath);
             } else {
                 sendMessage(chatController.createNotification("Error al transferir el archivo de audio."));
             }
@@ -184,10 +196,11 @@ public class ClientHandler implements Runnable {
                 socketOutStream.flush();
             }
         } else {
-            sendMessage(chatController.createNotification("El archivo de audio '" + fileName + "' no se encontró en el servidor."));
+            sendMessage(chatController
+                    .createNotification("El archivo de audio '" + fileName + "' no se encontró en el servidor."));
         }
     }
-    
+
     private void handleGroupHistoryRequest(JsonObject message) {
         String groupName = message.get("group_name").getAsString();
         sendMessage(chatController.createNotification("--- Últimos 15 mensajes de " + groupName + " ---"));
@@ -199,13 +212,13 @@ public class ClientHandler implements Runnable {
         sendMessage(chatController.createNotification("--- Tu historial privado con " + withUser + " ---"));
         chatController.getPrivateChatHistory(this.username, withUser, 15, 0).forEach(this::sendMessage);
     }
-    
+
     private void handleChatHistoryRequest(JsonObject message) {
         String type = message.get("type").getAsString();
         String name = message.get("name").getAsString();
         int limit = message.has("limit") ? message.get("limit").getAsInt() : 50;
         int offset = message.has("offset") ? message.get("offset").getAsInt() : 0;
-        
+
         List<String> messages;
         if ("general".equals(type) || "public".equals(type)) {
             messages = chatController.getPublicChatHistory(limit, offset);
@@ -217,7 +230,7 @@ public class ClientHandler implements Runnable {
             sendMessage(chatController.createNotification("Tipo de chat inválido."));
             return;
         }
-        
+
         // Enviar los mensajes como un array JSON
         JsonObject response = new JsonObject();
         response.addProperty("type", "chat_history_response");
@@ -265,11 +278,64 @@ public class ClientHandler implements Runnable {
         sendMessage(gson.toJson(response));
     }
 
+    private void handleWebRTCSignaling(JsonObject message) {
+        try {
+            if (!message.has("type") || !message.has("to")) {
+                System.err.println("WebRTC signaling message missing 'type' or 'to': " + message);
+                return;
+            }
+
+            String type = message.get("type").getAsString();
+            String recipient = message.get("to").getAsString();
+
+            // Get recipient's handler
+            ClientHandler recipientHandler = chatController.getOnlineUser(recipient);
+            if (recipientHandler != null) {
+                // Forward the signaling message to the recipient
+                JsonObject forwardMessage = new JsonObject();
+                forwardMessage.addProperty("type", type);
+                forwardMessage.addProperty("from", this.username);
+
+                // Copy SDP or ICE candidate data
+                if (message.has("sdp")) {
+                    forwardMessage.add("sdp", message.get("sdp"));
+                }
+                if (message.has("candidate")) {
+                    forwardMessage.add("candidate", message.get("candidate"));
+                }
+
+                recipientHandler.sendMessage(gson.toJson(forwardMessage));
+                System.out.println("WebRTC " + type + " forwarded from " + this.username + " to " + recipient);
+            } else {
+                System.err.println("Cannot forward WebRTC message: recipient " + recipient + " not found");
+            }
+        } catch (Exception e) {
+            System.err.println("Error handling WebRTC signaling: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
     public void sendMessage(String message) {
         out.println(message);
     }
 
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
-}
+    public void sendAudioPacket(byte[] audioData) {
+        try {
+            String base64Audio = java.util.Base64.getEncoder().encodeToString(audioData);
+            JsonObject json = new JsonObject();
+            json.addProperty("type", "call_audio");
+            json.addProperty("data", base64Audio);
+            sendMessage(gson.toJson(json));
+        } catch (Exception e) {
+            System.err.println("Error enviando paquete de audio a " + username + ": " + e.getMessage());
+        }
+    }
 
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+}

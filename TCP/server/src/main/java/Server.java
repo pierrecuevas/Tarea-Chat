@@ -13,12 +13,68 @@ public class Server {
         // Se crea una única instancia del CallManager para compartirla.
         CallManager callManager = new CallManager();
 
+        // Inicializar ChatController explícitamente
+        ChatController.getInstance(callManager);
+
         // Se inicia el servidor UDP en un hilo separado, pasándole el CallManager.
         new Thread(new UdpServer(callManager)).start();
 
+        // Start HTTP Server for audio files
+        new Thread(() -> {
+            try {
+                com.sun.net.httpserver.HttpServer httpServer = com.sun.net.httpserver.HttpServer
+                        .create(new java.net.InetSocketAddress(3001), 0);
+                httpServer.createContext("/audio", exchange -> {
+                    // Add CORS headers
+                    exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+                    exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, OPTIONS");
+                    exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type,Authorization");
+
+                    if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        exchange.sendResponseHeaders(204, -1);
+                        return;
+                    }
+
+                    String path = exchange.getRequestURI().getPath();
+                    String fileName = path.substring(path.lastIndexOf('/') + 1);
+                    java.io.File file = new java.io.File("server_audio_files/" + fileName);
+
+                    if (file.exists() && !file.isDirectory()) {
+                        exchange.getResponseHeaders().add("Content-Type", "audio/webm");
+                        exchange.getResponseHeaders().add("Accept-Ranges", "bytes");
+                        exchange.getResponseHeaders().add("Cache-Control", "no-cache");
+                        exchange.sendResponseHeaders(200, file.length());
+                        try (java.io.OutputStream os = exchange.getResponseBody();
+                                java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+                            byte[] buffer = new byte[4096];
+                            int count;
+                            while ((count = fis.read(buffer)) != -1) {
+                                os.write(buffer, 0, count);
+                            }
+                        }
+                    } else {
+                        String response = "File not found";
+                        exchange.sendResponseHeaders(404, response.length());
+                        try (java.io.OutputStream os = exchange.getResponseBody()) {
+                            os.write(response.getBytes());
+                        }
+                    }
+                });
+                httpServer.setExecutor(null);
+                httpServer.start();
+                System.out.println("Servidor HTTP de audio iniciado en el puerto 3001");
+            } catch (IOException e) {
+            }
+        }).start();
+
         // Start ICE Server in a separate thread
         new Thread(() -> {
-            try (com.zeroc.Ice.Communicator communicator = com.zeroc.Ice.Util.initialize(args)) {
+            com.zeroc.Ice.Properties properties = com.zeroc.Ice.Util.createProperties();
+            properties.setProperty("Ice.MessageSizeMax", "10240"); // 10MB limit
+            com.zeroc.Ice.InitializationData initData = new com.zeroc.Ice.InitializationData();
+            initData.properties = properties;
+
+            try (com.zeroc.Ice.Communicator communicator = com.zeroc.Ice.Util.initialize(args, initData)) {
                 System.out.println("Iniciando servidor ICE...");
                 com.zeroc.Ice.ObjectAdapter adapter = communicator.createObjectAdapterWithEndpoints("VoiceChatAdapter",
                         "ws -h 0.0.0.0 -p 10000");

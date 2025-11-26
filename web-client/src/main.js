@@ -164,6 +164,43 @@ function initializeApp() {
       const success = await voiceChatClient.initialize();
       if (!success) {
         console.warn('Voice chat initialization failed - voice features may not work');
+      } else {
+        // Set up WebRTC signaling callback
+        voiceChatClient.onSignalingMessage = async (message) => {
+          try {
+            console.log('Original signaling message:', message);
+            console.log('message.type:', message.type, 'typeof:', typeof message.type);
+            console.log('message.to:', message.to, 'typeof:', typeof message.to);
+
+            // Defensive copying
+            const msgType = message.type;
+            const msgTo = message.to;
+
+            // Explicitly construct the message
+            const serverMessage = {
+              command: msgType,
+              type: msgType,
+              to: msgTo
+            };
+
+            // Add optional fields
+            if (message.sdp) serverMessage.sdp = message.sdp;
+            if (message.candidate) serverMessage.candidate = message.candidate;
+
+            console.log('Constructed server message (pre-send):', serverMessage);
+            console.log('JSON stringify check:', JSON.stringify(serverMessage));
+
+            // DEBUG: Alert user if fields are missing
+            if (!serverMessage.type || !serverMessage.to) {
+              alert(`ERROR CRÍTICO: Datos faltantes. Type: ${serverMessage.type}, To: ${serverMessage.to}`);
+              console.error("Mensaje incompleto:", serverMessage);
+            }
+
+            await sendMessage(serverMessage, sessionId);
+          } catch (err) {
+            console.error('Error sending WebRTC signal:', err);
+          }
+        };
       }
     }
   }, 100);
@@ -350,7 +387,7 @@ function processIncomingMessage(message) {
     };
 
     // Guardar en historial SIEMPRE, incluso si no está en el chat actual
-    if (sub_type === 'public') {
+    if (sub_type === 'public' || sub_type === 'public_audio') {
       // Evitar duplicados
       const exists = messageHistory.general.some(m =>
         m.sender === messageWithTime.sender &&
@@ -367,7 +404,8 @@ function processIncomingMessage(message) {
         chatWindow.addMessage(messageWithTime);
       }
 
-    } else if (sub_type === 'private_from' || sub_type === 'private_to') {
+    } else if (sub_type === 'private_from' || sub_type === 'private_to' ||
+      sub_type === 'private_audio_from' || sub_type === 'private_audio_to') {
       const otherUser = sub_type === 'private_from' ? sender : party;
       chatList.addPrivateChat(otherUser);
 
@@ -391,7 +429,7 @@ function processIncomingMessage(message) {
         chatWindow.addMessage(messageWithTime);
       }
 
-    } else if (sub_type === 'group' && group) {
+    } else if ((sub_type === 'group' || sub_type === 'group_audio') && group) {
       if (!messageHistory.group[group]) {
         messageHistory.group[group] = [];
       }
@@ -424,6 +462,52 @@ function processIncomingMessage(message) {
   } else if (message.type === 'chat_history_response') {
     // Los mensajes del historial ya se procesaron en loadChatHistory
     // Este tipo de mensaje se maneja directamente en loadChatHistory
+  } else if (message.type === 'call_audio') {
+    if (voiceChatClient && voiceChatClient.isInCall) {
+      voiceChatClient.playAudioPacket(message.data);
+    }
+  } else if (message.type === 'call_request') {
+    // Incoming call notification
+    if (callControls) {
+      callControls.showIncomingCall(message.from);
+    }
+    chatWindow.addSystemMessage(`📞 Llamada entrante de ${message.from}`);
+  } else if (message.type === 'call_accepted') {
+    // Call was accepted
+    if (callControls) {
+      callControls.showActiveCall(message.with);
+    }
+    chatWindow.addSystemMessage(`✅ Llamada conectada con ${message.with}`);
+  } else if (message.type === 'call_rejected') {
+    // Call was rejected
+    if (callControls) {
+      callControls.hideCall();
+    }
+    chatWindow.addSystemMessage(`❌ ${message.user} rechazó la llamada`);
+  } else if (message.type === 'call_ended') {
+    // Call ended
+    if (callControls) {
+      callControls.hideCall();
+    }
+    if (voiceChatClient) {
+      voiceChatClient.isInCall = false;
+    }
+    chatWindow.addSystemMessage('📞 Llamada finalizada');
+  } else if (message.type === 'webrtc_offer') {
+    // WebRTC offer received
+    if (voiceChatClient) {
+      voiceChatClient.handleWebRTCOffer(message.sdp, message.from);
+    }
+  } else if (message.type === 'webrtc_answer') {
+    // WebRTC answer received
+    if (voiceChatClient) {
+      voiceChatClient.handleWebRTCAnswer(message.sdp);
+    }
+  } else if (message.type === 'ice_candidate') {
+    // ICE candidate received
+    if (voiceChatClient) {
+      voiceChatClient.handleICECandidate(message.candidate);
+    }
   }
 }
 
@@ -687,7 +771,7 @@ window.addEventListener('beforeunload', async () => {
       }
 
       // Enviar desconexión al backend
-      await fetch('http://localhost:3000/disconnect', {
+      await fetch(`http://${window.location.hostname}:3000/disconnect`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

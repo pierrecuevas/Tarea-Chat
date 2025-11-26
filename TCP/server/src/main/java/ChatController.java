@@ -31,9 +31,9 @@ public class ChatController {
         }
         return instance;
     }
-    
+
     public static synchronized ChatController getInstance() {
-         if (instance == null) {
+        if (instance == null) {
             // Esto no debería pasar si Server.java se inicia primero.
             throw new IllegalStateException("ChatController no ha sido inicializado con un CallManager.");
         }
@@ -49,12 +49,17 @@ public class ChatController {
         }
     }
 
+    public ClientHandler getOnlineUser(String username) {
+        return onlineUsers.get(username);
+    }
+
     // --- Lógica de Llamadas ---
     public void requestCall(String requester, String callee) {
         ClientHandler requesterHandler = onlineUsers.get(requester);
         ClientHandler calleeHandler = onlineUsers.get(callee);
-        
-        if (requesterHandler == null) return;
+
+        if (requesterHandler == null)
+            return;
 
         if (calleeHandler != null) {
             JsonObject callRequest = new JsonObject();
@@ -72,25 +77,28 @@ public class ChatController {
         if (callManager.startCall(accepter, requester)) {
             JsonObject callAccepted = new JsonObject();
             callAccepted.addProperty("type", "call_accepted");
-            
+
             callAccepted.addProperty("with", requester);
             onlineUsers.get(accepter).sendMessage(gson.toJson(callAccepted));
 
             callAccepted.addProperty("with", accepter);
             onlineUsers.get(requester).sendMessage(gson.toJson(callAccepted));
         } else {
-            // BLOQUE AÑADIDO: Notificar a ambos usuarios que la llamada no se pudo establecer
+            // BLOQUE AÑADIDO: Notificar a ambos usuarios que la llamada no se pudo
+            // establecer
             ClientHandler requesterHandler = onlineUsers.get(requester);
             if (requesterHandler != null) {
-                requesterHandler.sendMessage(createNotification("No se pudo establecer la llamada con " + accepter + "."));
+                requesterHandler
+                        .sendMessage(createNotification("No se pudo establecer la llamada con " + accepter + "."));
             }
             ClientHandler accepterHandler = onlineUsers.get(accepter);
             if (accepterHandler != null) {
-                accepterHandler.sendMessage(createNotification("No se pudo establecer la llamada con " + requester + "."));
+                accepterHandler
+                        .sendMessage(createNotification("No se pudo establecer la llamada con " + requester + "."));
             }
         }
     }
-    
+
     public void endCall(String username) {
         String partner = callManager.getCallPartner(username);
         callManager.endCall(username);
@@ -99,12 +107,15 @@ public class ChatController {
         callEnded.addProperty("type", "call_ended");
 
         ClientHandler userHandler = onlineUsers.get(username);
-        if(userHandler != null) userHandler.sendMessage(gson.toJson(callEnded));
-        
-        ClientHandler partnerHandler = onlineUsers.get(partner);
-        if(partnerHandler != null) partnerHandler.sendMessage(gson.toJson(callEnded));
-    }
+        if (userHandler != null)
+            userHandler.sendMessage(gson.toJson(callEnded));
 
+        if (partner != null) {
+            ClientHandler partnerHandler = onlineUsers.get(partner);
+            if (partnerHandler != null)
+                partnerHandler.sendMessage(gson.toJson(callEnded));
+        }
+    }
 
     // Recopila y envía un resumen del historial (público, privado y de grupos)
     public void sendInitialHistoryToUser(ClientHandler handler) {
@@ -136,11 +147,10 @@ public class ChatController {
                 dbService.getGroupMessages(group, Integer.MAX_VALUE).forEach(handler::sendMessage);
             });
         }
-        
+
         handler.sendMessage(createNotification("------------------------------------"));
         handler.sendMessage(createNotification("¡Bienvenido!"));
     }
-
 
     // --- Otros métodos ---
     public synchronized boolean loginUser(String username, String password, ClientHandler handler) {
@@ -157,7 +167,7 @@ public class ChatController {
     public boolean registerUser(String username, String password) {
         return dbService.registerUser(username, password);
     }
-    
+
     public void processPublicMessage(String sender, String text) {
         dbService.savePublicMessage(sender, text);
         String messageJson = createChatMessage("public", sender, sender, text, null);
@@ -183,7 +193,7 @@ public class ChatController {
             broadcastToGroup(sender, groupName, messageJson);
         } else {
             ClientHandler handler = onlineUsers.get(sender);
-            if(handler != null) {
+            if (handler != null) {
                 handler.sendMessage(createNotification("No eres miembro del grupo '" + groupName + "'."));
             }
         }
@@ -192,7 +202,8 @@ public class ChatController {
     public void createGroup(String owner, String groupName) {
         DatabaseService.GroupCreationResult result = dbService.createGroup(groupName, owner);
         ClientHandler handler = onlineUsers.get(owner);
-        if (handler == null) return;
+        if (handler == null)
+            return;
         switch (result) {
             case SUCCESS:
                 handler.sendMessage(createNotification("Grupo '" + groupName + "' creado exitosamente."));
@@ -208,7 +219,8 @@ public class ChatController {
 
     public void inviteToGroup(String inviter, String groupName, String userToInvite) {
         ClientHandler inviterHandler = onlineUsers.get(inviter);
-        if (inviterHandler == null) return;
+        if (inviterHandler == null)
+            return;
         if (!dbService.isUserInGroup(inviter, groupName)) {
             inviterHandler.sendMessage(createNotification("No puedes invitar a un grupo del que no eres miembro."));
             return;
@@ -218,15 +230,18 @@ public class ChatController {
             return;
         }
         if (dbService.addUserToGroup(userToInvite, groupName)) {
-            broadcastToGroup(null, groupName, createNotification(userToInvite + " ha sido añadido al grupo por " + inviter + "."));
+            broadcastToGroup(null, groupName,
+                    createNotification(userToInvite + " ha sido añadido al grupo por " + inviter + "."));
         } else {
-            inviterHandler.sendMessage(createNotification("No se pudo añadir a '" + userToInvite + "' al grupo (quizás ya es miembro)."));
+            inviterHandler.sendMessage(
+                    createNotification("No se pudo añadir a '" + userToInvite + "' al grupo (quizás ya es miembro)."));
         }
     }
-    
+
     public void leaveGroup(String username, String groupName) {
         ClientHandler handler = onlineUsers.get(username);
-        if (handler == null) return;
+        if (handler == null)
+            return;
         if (dbService.removeUserFromGroup(username, groupName)) {
             handler.sendMessage(createNotification("Has salido del grupo '" + groupName + "'."));
             broadcastToGroup(username, groupName, createNotification(username + " ha salido del grupo."));
@@ -246,7 +261,7 @@ public class ChatController {
     public List<String> getPrivateChatHistory(String user1, String user2, int limit, int offset) {
         return dbService.getPrivateMessages(user1, user2, limit, offset);
     }
-    
+
     public String saveAudioFile(String sender, String originalFileName, InputStream inStream, long fileSize) {
         String newFileName = String.format("audio_%s_%d.wav", sender, audioFileCounter.getAndIncrement());
         File targetFile = new File(AUDIO_STORAGE_PATH + newFileName);
@@ -254,37 +269,57 @@ public class ChatController {
             byte[] buffer = new byte[4096];
             int bytesRead;
             long totalBytesRead = 0;
-            while (totalBytesRead < fileSize && (bytesRead = inStream.read(buffer, 0, (int)Math.min(buffer.length, fileSize - totalBytesRead))) != -1) {
+            while (totalBytesRead < fileSize && (bytesRead = inStream.read(buffer, 0,
+                    (int) Math.min(buffer.length, fileSize - totalBytesRead))) != -1) {
                 fos.write(buffer, 0, bytesRead);
                 totalBytesRead += bytesRead;
             }
-            if(totalBytesRead == fileSize) {
+            if (totalBytesRead == fileSize) {
                 return targetFile.getPath();
             }
         } catch (IOException e) {
-             System.err.println("Error guardando archivo de audio: " + e.getMessage());
+            System.err.println("Error guardando archivo de audio: " + e.getMessage());
         }
         return null;
     }
 
     public void processAudioMessage(String sender, String recipient, String audioFilePath) {
-        if (dbService.isGroup(recipient)) {
+        // Normalize recipient
+        if (recipient == null)
+            recipient = "general";
+        recipient = recipient.trim();
+
+        System.out.println("DEBUG processAudioMessage: sender=" + sender + ", recipient='" + recipient + "', path="
+                + audioFilePath);
+
+        if ("general".equalsIgnoreCase(recipient) || "public".equalsIgnoreCase(recipient)) {
+            System.out.println("DEBUG: Saving to PUBLIC messages");
+            dbService.savePublicMessage(sender, audioFilePath, "AUDIO");
+            String messageJson = createChatMessage("public_audio", sender, sender, new File(audioFilePath).getName(),
+                    null);
+            broadcastMessage(messageJson);
+        } else if (dbService.isGroup(recipient)) {
+            System.out.println("DEBUG: Saving to GROUP messages");
             dbService.saveGroupMessage(sender, recipient, audioFilePath, "AUDIO");
-            String messageJson = createChatMessage("group_audio", sender, null, new File(audioFilePath).getName(), recipient);
+            String messageJson = createChatMessage("group_audio", sender, null, new File(audioFilePath).getName(),
+                    recipient);
             broadcastToGroup(sender, recipient, messageJson);
         } else {
+            System.out.println("DEBUG: Saving to PRIVATE messages");
             dbService.savePrivateMessage(sender, recipient, audioFilePath, "AUDIO");
             ClientHandler recipientHandler = onlineUsers.get(recipient);
             if (recipientHandler != null) {
-                recipientHandler.sendMessage(createChatMessage("private_audio_from", sender, sender, new File(audioFilePath).getName(), null));
+                recipientHandler.sendMessage(createChatMessage("private_audio_from", sender, sender,
+                        new File(audioFilePath).getName(), null));
             }
             ClientHandler senderHandler = onlineUsers.get(sender);
             if (senderHandler != null) {
-                senderHandler.sendMessage(createChatMessage("private_audio_to", sender, recipient, new File(audioFilePath).getName(), null));
+                senderHandler.sendMessage(createChatMessage("private_audio_to", sender, recipient,
+                        new File(audioFilePath).getName(), null));
             }
         }
     }
-    
+
     public File getAudioFile(String fileName) {
         if (fileName == null || fileName.contains("..")) {
             return null;
@@ -292,23 +327,23 @@ public class ChatController {
         File file = new File(AUDIO_STORAGE_PATH + fileName);
         return (file.exists() && !file.isDirectory()) ? file : null;
     }
-    
+
     private void broadcastMessage(String message) {
         onlineUsers.values().forEach(handler -> handler.sendMessage(message));
     }
 
     private void broadcastToOthers(String excludedUsername, String message) {
         onlineUsers.values().stream()
-            .filter(h -> !h.getUsername().equals(excludedUsername))
-            .forEach(h -> h.sendMessage(message));
+                .filter(h -> !h.getUsername().equals(excludedUsername))
+                .forEach(h -> h.sendMessage(message));
     }
 
     private void broadcastToGroup(String excludedUsername, String groupName, String message) {
         dbService.getGroupMembers(groupName).stream()
-            .filter(member -> excludedUsername == null || !member.equals(excludedUsername))
-            .map(onlineUsers::get)
-            .filter(java.util.Objects::nonNull)
-            .forEach(handler -> handler.sendMessage(message));
+                .filter(member -> excludedUsername == null || !member.equals(excludedUsername))
+                .map(onlineUsers::get)
+                .filter(java.util.Objects::nonNull)
+                .forEach(handler -> handler.sendMessage(message));
     }
 
     public String createNotification(String message) {
@@ -329,10 +364,11 @@ public class ChatController {
             json.addProperty("group", group);
         }
         // Agregar timestamp actual para mensajes nuevos
-        json.addProperty("sent_at", java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME));
+        json.addProperty("sent_at",
+                java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME));
         return gson.toJson(json);
     }
-    
+
     public void rejectCall(String rejecter, String requester) {
         ClientHandler requesterHandler = onlineUsers.get(requester);
         if (requesterHandler != null) {
@@ -342,14 +378,19 @@ public class ChatController {
             requesterHandler.sendMessage(gson.toJson(callRejected));
         }
     }
-    
+
+    public void streamAudioToUser(String recipient, byte[] audioData) {
+        ClientHandler handler = onlineUsers.get(recipient);
+        if (handler != null) {
+            handler.sendAudioPacket(audioData);
+        }
+    }
+
     public List<String> getAllUsers() {
         return dbService.getAllUsers();
     }
-    
+
     public List<String> getGroupMembers(String groupName) {
         return dbService.getGroupMembers(groupName);
     }
 }
-
-

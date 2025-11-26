@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = `http://${window.location.hostname}:3000`;
 
 export function connectMessageStream(sessionId, onMessage) {
   let reader = null;
@@ -15,7 +15,7 @@ export function connectMessageStream(sessionId, onMessage) {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -91,7 +91,7 @@ export function connectMessageStream(sessionId, onMessage) {
   }
 
   connect();
-  
+
   return {
     close: () => {
       isClosed = true;
@@ -99,12 +99,3 @@ export function connectMessageStream(sessionId, onMessage) {
     }
   };
 }
-window.addEventListener('beforeunload', () => {
-  // Enviar mensaje de desconexión
-  fetch('http://localhost:3000/disconnect', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${sessionId}` }
-  }).catch(() => {});
-});
-
-
