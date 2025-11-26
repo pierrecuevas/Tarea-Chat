@@ -1,0 +1,20 @@
+1. Iniciar backend Java (server ICE + TCP)
+
+Ir a la carpeta donde están build.gradle y server.jar del despliegue.
+
+Comando:
+
+gradlew run
+2. PROXY CORRER PROXY
+3. Ejecuta:
+
+npx serve .
+
+o npx http-server . (si tienes http-server instalado).
+
+base de datos:
+private static final String DB_URL = "jdbc:postgresql://localhost:5432/chatdb";
+    private static final String DB_USER = "chatuser";
+    private static final String DB_PASSWORD = "chatpassword";
+
+crear base de datos llamada chatdb 

@@ -1,0 +1,24 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation "org.postgresql:postgresql:42.6.0"
+    implementation "com.google.code.gson:gson:2.13.2"
+    implementation "org.mindrot:jbcrypt:0.4"
+    implementation "com.zeroc:ice:3.7.10"
+}
+
+application {
+    // Cambia esto si tu clase Server está en un paquete
+    mainClass = 'Server'
+}
+
+tasks.named('run') {
+    // Añadimos tu jar compilado al classpath
+    classpath += files('server.jar')
+}
