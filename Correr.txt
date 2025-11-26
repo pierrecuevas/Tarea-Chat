@@ -1,3 +1,70 @@
-Ve a chrome://flags/#unsafely-treat-insecure-origin-as-secure
-Habilita y agrega http://192.168.0.25:3123
-Reinicia el navegador.
+================================================================================
+GUÍA DE INSTALACIÓN Y EJECUCIÓN - CHAT P2P CON VOZ
+================================================================================
+
+PRERREQUISITOS
+--------------------------------------------------------------------------------
+1. Java Development Kit (JDK) 21 o superior.
+2. Node.js (v18 o superior) y npm.
+3. MySQL Server.
+4. Gradle (opcional, el proyecto incluye gradlew).
+
+INSTALACIÓN
+--------------------------------------------------------------------------------
+
+1. Clonar o copiar el proyecto en la nueva máquina.
+
+2. Configurar la Base de Datos:
+   - Asegúrate de tener MySQL corriendo.
+   - Crea la base de datos y las tablas usando el script SQL proporcionado (si no lo tienes, avísame para generarlo).
+   - Verifica las credenciales en: `TCP/server/src/main/java/DatabaseService.java`
+     (Por defecto: usuario 'root', contraseña 'root', puerto 3306).
+
+3. Instalar dependencias del Cliente Web:
+   - Abre una terminal en la carpeta `web-client`.
+   - Ejecuta: `npm install`
+
+4. Instalar dependencias del Proxy Node.js:
+   - Abre una terminal en la carpeta `proxy-node`.
+   - Ejecuta: `npm install`
+
+EJECUCIÓN (En 3 terminales diferentes)
+--------------------------------------------------------------------------------
+
+TERMINAL 1: Servidor Java (Backend principal)
+   - Ve a la carpeta raíz del proyecto (`Tarea-Chat`).
+   - Compila y ejecuta:
+     ./gradlew run
+   - Deberías ver: "Servidor de Chat (TCP) iniciado en el puerto 12345" y "Servidor ICE iniciado...".
+
+TERMINAL 2: Proxy Node.js (Intermediario para WebRTC)
+   - Ve a la carpeta `proxy-node`.
+   - Ejecuta:
+     npm start
+     node src/index.js
+     
+   - Deberías ver: "Proxy server running on port 3000".
+
+TERMINAL 3: Cliente Web (Frontend)
+   - Ve a la carpeta `web-client`.
+   - Ejecuta:
+     npm run dev
+   - Deberías ver: "Project is running at: http://0.0.0.0:3123/"
+
+CONFIGURACIÓN PARA LLAMADAS EN MÓVIL (IMPORTANTE)
+--------------------------------------------------------------------------------
+Para usar el micrófono desde otro dispositivo (móvil o laptop) en la misma red WiFi, el navegador bloquea el acceso si no es HTTPS. Debes habilitar una excepción:
+
+1. Averigua la IP de tu computadora (ej. 192.168.0.25).
+2. En el navegador del móvil (Chrome/Edge), ve a:
+   chrome://flags/#unsafely-treat-insecure-origin-as-secure
+3. Habilita la opción ("Enabled").
+4. En el cuadro de texto, agrega la dirección completa con puerto:
+   http://192.168.0.25:3123
+5. Reinicia el navegador del móvil.
+
+SOLUCIÓN DE PROBLEMAS COMUNES
+--------------------------------------------------------------------------------
+- "WebRTC signaling message missing type": Reinicia el Proxy Node.js (Terminal 2).
+- "Connection refused": Verifica que el firewall de Windows permita conexiones en los puertos 3000, 3001, 3123, 12345 y 10000.
+- "No hay audio": Asegúrate de haber aceptado los permisos de micrófono en el navegador.
