@@ -140,3 +140,109 @@ Abre el navegador en donde dice el proyecto, con Live Server es el puerto 5500.
    ⇅         (Protocolo TCP propio)
 [Backend TCP]
 ```
+# TAREA 3
+# Chat ahora con Llamadas y envio de Mensajes de voz
+
+Este proyecto es una aplicación de chat completa que soporta mensajería de texto (pública, privada y grupal) y llamadas de voz utilizando. La arquitectura combina un servidor backend en Java (usando ZeroC Ice), un cliente web moderno y un proxy Node.js para facilitar la comunicación. Aqui Utilizamos las tareas anteriores y le añadimos el envio de audios y un tipo de llamada que es como un voice chat.
+
+## 📂 Estructura del Proyecto
+
+```
+Tarea-Chat/
+├── TCP/
+│   └── server/          # Backend principal en Java
+│       ├── src/         # Código fuente Java (Ice objects, lógica de BD)
+├── web-client/          # Frontend Web
+│   ├── src/             # Código fuente JS/HTML (Webpack)
+│   ├── Chat.ice         # Definición de la interfaz Slice
+│   └── package.json     # Dependencias del cliente (Ice.js, etc.)
+├── proxy-node/          # Servidor Intermediario
+│   ├── src/             # Lógica del proxy (Express, WebRTC signaling)
+│   └── package.json     # Dependencias del proxy
+├── database_setup.sql   # Script SQL para crear la base de datos PostgreSQL
+├── build.gradle         # Build script raíz
+└── Correr.txt           # Guía rápida de ejecución original
+```
+
+## 🛠️ Explicación de Componentes
+
+### 1. Servidor Java (Backend)
+- **Tecnología**: Java 21+, ZeroC Ice 3.7.10, PostgreSQL.
+- **Función**: Actúa como el núcleo del sistema. Maneja:
+  - Autenticación de usuarios y gestión de sesiones.
+  - Lógica de negocio para el chat (mensajes, grupos).
+  - Persistencia de datos en PostgreSQL.
+  - Comunicación RPC a través de Ice.
+
+### 2. Cliente Web (Frontend)
+- **Tecnología**: HTML5, JavaScript, Webpack, Ice for JavaScript.
+- **Función**: Interfaz de usuario para el chat.
+  - Se conecta al servidor Java mediante Ice (a través de Glacier2 o conexión directa si es posible, en este caso configurado para WebSocket/Ice).
+  - Maneja la captura y reproducción de audio para las llamadas.
+
+### 3. Proxy Node.js
+- **Tecnología**: Node.js, Express.
+- **Función**: Facilita la señalización para WebRTC y sirve como puente para ciertas comunicaciones si es necesario. Resuelve problemas de conectividad directa entre navegadores y el servidor Ice para ciertos flujos de datos o señalización de llamadas.
+
+---
+
+## Flujo de Comunicación
+
+### **1. Login y Registro**
+
+- El usuario ve una pantalla de login/registro.
+- Al registrarse/logearse, el frontend envía credenciales al **proxy** vía HTTP.
+- El proxy transforma la petición, la envía al backend TCP.
+- El backend TCP valida y responde con éxito/fracaso.
+- El proxy reenvía la respuesta al frontend, que muestra el resultado.
+
+
+### **2. Uso de la aplicación**
+
+- Al iniciar sesión, el usuario ve íconos para chats públicos, privados y grupos.
+- Las listas de chats y usuarios en línea usan iconos diferenciadores (🌐 público, 👤 privados, 👥 grupos).
+
+
+#### **a. Mensajería**
+
+- Mensajes se envían del frontend al proxy por HTTP o WebSocket.
+- El proxy los reenvía al backend TCP.
+- El backend TCP gestiona el almacenamiento y el envío a los destinatarios (broadcast, grupo o privado).
+- Las respuestas/flujos de mensaje llegan del backend al proxy y de allí al frontend por un stream/socket abierto.
+
+
+#### **b. Creación de grupo**
+
+- El usuario presiona el botón "+" en la barra lateral.
+- Aparece un modal para ingresar nombre de grupo e invitar usuarios.
+- Al crear, se hace una petición al proxy para crear el grupo, luego otra/s para invitar usuarios.
+- El backend TCP agrega en la estructura adecuada y notifica a los usuarios.
+
+
+#### **c. Actualización de listas y usuarios**
+
+- El frontend periódicamente (o vía sockets/eventos) pide las listas de usuarios y chats al proxy, que consulta al backend.
+- Todos los clics/interacciones en la interfaz solo disparan lógica en frontend y peticiones API/proxy para mantener sincronía.
+
+#### **d. Notas de Voz (Audios)**
+
+- El usuario graba un audio en el frontend (API MediaRecorder).
+- El archivo de audio se envía al **proxy** mediante una petición POST (multipart/form-data).
+- El proxy guarda temporalmente el archivo o lo transmite al servidor Java.
+- El servidor TCP registra el mensaje con tipo `AUDIO` y la ruta/referencia del archivo.
+- Los destinatarios reciben la notificación del nuevo mensaje.
+- Al reproducir, el frontend solicita el archivo de audio al proxy/servidor, que lo sirve como recurso estático o stream.
+
+#### **e. Llamadas de Voz (WebRTC)**
+
+- **Inicio**: Un usuario inicia una llamada a otro (privado).
+- **Señalización**:
+  - El frontend genera una oferta SDP (Session Description Protocol).
+  - Envía la oferta al **proxy** vía WebSocket/HTTP.
+  - El proxy busca al destinatario y le reenvía la oferta.
+- **Respuesta**:
+  - El destinatario acepta, genera una respuesta SDP y la envía de vuelta al proxy -> iniciador.
+  - Se intercambian candidatos ICE (información de red) a través del proxy para establecer la ruta.
+- **Conexión P2P**:
+  - Una vez completada la señalización, los navegadores establecen una conexión directa (Peer-to-Peer).
+  - El audio fluye directamente entre los usuarios (UDP/TCP) sin pasar por el servidor Java ni el proxy (salvo si se usa TURN, pero en red local es directo).
